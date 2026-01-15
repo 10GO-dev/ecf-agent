@@ -1,0 +1,21 @@
+# Core
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Database drivers
+pymysql>=1.1
+psycopg2-binary>=2.9
+pyodbc>=5.0
+# cx_Oracle>=8.3  # Uncomment if Oracle support needed
+
+# HTTP client
+httpx>=0.25
+
+# Scheduling
+apscheduler>=3.10
+
+# Logging
+loguru>=0.7
+
+# CLI
+click>=8.1

@@ -1,0 +1,32 @@
+# Core (development)
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Database drivers
+pymysql>=1.1
+psycopg2-binary>=2.9
+pyodbc>=5.0
+# cx_Oracle>=8.3  # Uncomment if Oracle support needed
+
+# JSONata transformation
+jsonata>=0.4
+
+# HTTP client
+httpx>=0.25
+
+# Scheduling
+apscheduler>=3.10
+
+# Logging
+loguru>=0.7
+
+# CLI
+click>=8.1
+
+# Development & Testing
+pytest>=7.4
+pytest-cov>=4.1
+pytest-asyncio>=0.21
+black>=23.0
+flake8>=6.0
+mypy>=1.5

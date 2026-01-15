@@ -1,0 +1,145 @@
+# Configuración del Agente ECF
+# Copiar este archivo a config.yaml y ajustar valores
+
+agent:
+  # RNC del cliente (emisor de los comprobantes)
+  customer_rnc: "101010101"
+  
+  # Intervalo de polling a la base de datos (segundos)
+  polling_interval_seconds: 30
+  
+  # Máximo de facturas por request al API
+  batch_size: 50
+  
+  # Intervalo de reintento para facturas fallidas (segundos)
+  retry_interval_seconds: 300
+  
+  # Máximo de reintentos antes de marcar como fallida
+  max_retries: 5
+
+# Conexión a la API de TekServices
+api:
+  base_url: "https://api.tekservices.com"
+  endpoint: "/private/ecf/dgii-send"
+  
+  # Autenticación Basic Auth (usar variables de entorno)
+  username: "${ECF_API_USERNAME}"
+  password: "${ECF_API_PASSWORD}"
+  
+  # Timeout para requests HTTP (segundos)
+  timeout_seconds: 30
+
+# Conexión a la base de datos del cliente
+database:
+  # Driver: mysql | postgres | sqlserver | oracle
+  driver: "mysql"
+  
+  host: "localhost"
+  port: 3306
+  database: "facturacion"
+  username: "ecf_reader"
+  password: "${DB_PASSWORD}"
+  
+  # ============================================================
+  # QUERY DE EXTRACCIÓN
+  # ============================================================
+  # Esta query debe retornar JSON con la estructura de factura.
+  # Debe incluir un campo JSON_OBJECT que genere la estructura
+  # con ECF (cabecera), Detalles (array) y FormasPago (array).
+  #
+  # Variables disponibles:
+  #   - {batch_size}: número máximo de facturas a obtener
+  #
+  # IMPORTANTE: La query debe filtrar solo facturas NO procesadas
+  # y retornar el JSON completo por cada factura.
+  # ============================================================
+  
+  query: |
+    SELECT 
+        e.transaccionid as id,
+        e.encf as ecf_number,
+        e.tipoecf as ecf_type,
+        e.RNCComprador as rnc_buyer,
+        e.MontoTotal as total_amount,
+        JSON_OBJECT(
+            'ECF', JSON_OBJECT(
+                'transaccionid', e.transaccionid,
+                'tipoecf', e.tipoecf,
+                'encf', e.encf,
+                'RNCEmisor', e.RNCEmisor,
+                'RNCComprador', e.RNCComprador,
+                'MontoTotal', e.MontoTotal
+                -- Agregar el resto de campos según su estructura
+            ),
+            'Detalles', (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'linea', d.linea,
+                        'CodigoItem', d.CodigoItem,
+                        'NombreItem', d.NombreItem,
+                        'CantidadItem', d.CantidadItem,
+                        'MontoItem', d.MontoItem
+                        -- Agregar el resto de campos
+                    )
+                )
+                FROM interfazencfdet d
+                WHERE d.transaccionid = e.transaccionid
+            ),
+            'FormasPago', (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'formapago', f.formapago,
+                        'montopago', f.montopago
+                    )
+                )
+                FROM ecfformapago f
+                WHERE f.transaccionid = e.transaccionid
+            )
+        ) as invoice_json
+    FROM interfazencf e
+    WHERE e.procesadadgii = 'N'
+    ORDER BY e.transaccionid ASC
+    LIMIT {batch_size}
+  
+  # Campo que contiene el JSON de la factura en el resultado
+  json_field: "invoice_json"
+  
+  # Campo ID único de la factura
+  id_field: "id"
+  
+  # Campo e-NCF
+  ecf_field: "ecf_number"
+  
+  # Campo tipo de comprobante
+  type_field: "ecf_type"
+  
+  # Campo RNC comprador
+  rnc_buyer_field: "rnc_buyer"
+  
+  # Campo monto total
+  total_field: "total_amount"
+  
+  # Query para marcar como procesada
+  # Variables disponibles: {id}
+  update_query: |
+    UPDATE interfazencf 
+    SET procesadadgii = 'S', 
+        fecha_procesada = NOW() 
+    WHERE transaccionid = {id}
+
+# Configuración de logs
+logging:
+  # Nivel: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # Archivo de log
+  file: "./logs/ecf-agent.log"
+  
+  # Tamaño máximo del archivo (MB)
+  max_size_mb: 10
+  
+  # Cantidad de archivos de backup a mantener
+  backup_count: 5
+  
+  # Mostrar en consola
+  console: true
