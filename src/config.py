@@ -184,15 +184,20 @@ class Config:
         Raises:
             ConfigError: Si falta algún campo requerido
         """
+        # Campos siempre requeridos
         required = [
             ("agent.customer_rnc", "RNC del cliente"),
             ("api.base_url", "URL base de la API"),
             ("api.endpoint", "Endpoint de la API"),
             ("database.driver", "Driver de base de datos"),
-            ("database.host", "Host de base de datos"),
-            ("database.database", "Nombre de base de datos"),
+            ("database.database", "Nombre/ruta de base de datos"),
             ("database.query", "Query de consulta"),
         ]
+        
+        # database.host solo es requerido para drivers que no son SQLite
+        driver = self.get("database.driver", "").lower()
+        if driver not in ("sqlite", "sqlite3"):
+            required.append(("database.host", "Host de base de datos"))
         
         missing = []
         for key, description in required:

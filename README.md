@@ -6,23 +6,23 @@ Agente de recolección de comprobantes fiscales electrónicos (e-CF) para instal
 
 1. **Conecta** a la base de datos del sistema de facturación del cliente
 2. **Ejecuta** una query SQL configurada que retorna facturas en formato JSON
-3. **Comprime** cada factura (gzip + base64)
+3. **Comprime** cada factura (MessagePack + zstd + base64)
 4. **Envía** al servidor de TekServices en batches
 5. **Reintenta** automáticamente las facturas que fallen
 
 ```mermaid
 graph LR
     BD[(BD Cliente)] -->|Query SQL| Agent[ECF Agent]
-    Agent -->|JSON| Compress[gzip + base64]
-    Compress -->|POST| API[TekServices API]
+    Agent -->|MessagePack| Compress[zstd + base64]
+    Compress -->|POST JSON| API[TekServices API]
     Agent -.->|Reintentos| Queue[(SQLite)]
     Queue -.-> Agent
 ```
 
 ## Características
 
-- 🔌 Soporte multi-BD: MySQL, PostgreSQL, SQL Server, Oracle
-- 📦 Compresión automática (gzip + base64)
+- 🔌 Soporte multi-BD: MySQL, PostgreSQL, SQL Server, Oracle, SQLite
+- 📦 Compresión optimizada (MessagePack + zstd + base64)
 - 🔁 Cola de reintentos con SQLite
 - ⚙️ Instalación como servicio (Windows/Linux)
 - 📊 CLI para gestión y monitoreo
@@ -41,14 +41,17 @@ source venv/bin/activate  # Linux/macOS
 # 3. Instalar dependencias
 pip install -r requirements.txt
 
-# 4. Configurar
+# 4. Instalar compresión zstd (recomendado)
+pip install msgpack zstandard
+
+# 5. Configurar
 cp config/config.example.yaml config/config.yaml
 # Editar config.yaml con credenciales de BD y API
 
-# 5. Validar configuración
+# 6. Validar configuración
 python -m src.main validate
 
-# 6. Ejecutar
+# 7. Ejecutar
 python -m src.main run
 ```
 
@@ -58,12 +61,97 @@ python -m src.main run
 
 ```bash
 # .env
-ECF_API_USERNAME=your_api_username
-ECF_API_PASSWORD=your_api_password
+ECF_API_KEY=your_api_key_here
 DB_PASSWORD=your_db_password
 ```
 
-### Query SQL
+### Métodos de Compresión
+
+| Método | Descripción | Tamaño | Velocidad |
+|--------|-------------|--------|-----------|
+| `zstd` (default) | MessagePack + zstd + base64 | ~35% más pequeño | 5-10x más rápido |
+| `gzip` | JSON + gzip + base64 | Base | Moderada |
+| `none` | Sin compresión | 100% | N/A |
+
+```yaml
+# config.yaml
+api:
+  compression: "zstd"  # Opciones: zstd, gzip, none
+```
+
+## Descompresión en el Servidor (Node.js)
+
+El agente envía datos comprimidos con **Base64 + zstd + MessagePack**. Para descomprimir:
+
+```javascript
+const { decode } = require('@msgpack/msgpack');
+const { ZstdCodec } = require('zstd-codec');
+
+/**
+ * Descomprime invoice_data recibido del agente
+ * @param {string} compressedBase64 - Datos en formato base64
+ * @param {string} compressionMethod - "zstd" | "gzip" | "none"
+ * @returns {Promise<object>} - Objeto JSON de la factura
+ */
+async function decompressInvoiceData(compressedBase64, compressionMethod = 'zstd') {
+    if (compressionMethod === 'none') {
+        return JSON.parse(compressedBase64);
+    }
+    
+    if (compressionMethod === 'gzip') {
+        const zlib = require('zlib');
+        const compressedBuffer = Buffer.from(compressedBase64, 'base64');
+        const decompressed = zlib.gunzipSync(compressedBuffer);
+        return JSON.parse(decompressed.toString('utf-8'));
+    }
+    
+    // zstd (default)
+    return new Promise((resolve, reject) => {
+        ZstdCodec.run(zstd => {
+            try {
+                // 1. Base64 → Buffer (bytes comprimidos)
+                const compressedBuffer = Buffer.from(compressedBase64, 'base64');
+                
+                // 2. zstd decompress → bytes MessagePack
+                const simple = new zstd.Simple();
+                const decompressed = simple.decompress(compressedBuffer);
+                
+                // 3. MessagePack decode → objeto JavaScript
+                const data = decode(decompressed);
+                
+                resolve(data);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    });
+}
+
+// Uso en Express endpoint
+app.post('/private/ecf/dgii-send', async (req, res) => {
+    const { compression, invoices } = req.body;
+    
+    for (const invoice of invoices) {
+        const invoiceData = await decompressInvoiceData(
+            invoice.invoice_data,
+            invoice.compression || compression
+        );
+        
+        console.log('Factura descomprimida:', invoiceData);
+        // { ECF: {...}, Detalles: [...], FormasPago: [...] }
+    }
+    
+    res.json({ success: true });
+});
+```
+
+### Dependencias del servidor
+
+```bash
+npm install @msgpack/msgpack zstd-codec
+```
+
+## Query SQL
 
 La query configurada debe:
 1. Retornar facturas NO procesadas

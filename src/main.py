@@ -53,6 +53,7 @@ class ECFAgent:
         self.customer_rnc = config.get("agent.customer_rnc")
         self.batch_size = config.get("agent.batch_size", 50)
         self.max_retries = config.get("agent.max_retries", 5)
+        self.compression_method = config.get("api.compression", "zstd")
         
         # Campos de la query
         self.json_field = config.get("database.json_field", "invoice_json")
@@ -156,6 +157,7 @@ class ECFAgent:
                         self.customer_rnc,
                         invoices_to_send,
                         compress=True,
+                        compression_method=self.compression_method,
                     )
                     
                     # Marcar como procesadas
@@ -204,6 +206,7 @@ class ECFAgent:
                     item["customer_rnc"],
                     item["payload"],
                     compress=True,
+                    compression_method=self.compression_method,
                 )
                 
                 # Éxito: eliminar de cola

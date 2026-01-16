@@ -1,6 +1,6 @@
 """
 Cliente HTTP para envío de comprobantes a la API de TekServices.
-Versión simplificada para envío de JSON raw comprimido.
+Soporta compresión gzip y zstd (default) con base64.
 """
 
 import json
@@ -25,7 +25,7 @@ class ECFApiClient:
     """
     Cliente para enviar comprobantes fiscales a la API de TekServices.
     
-    Soporta autenticación Basic Auth y compresión de datos.
+    Soporta autenticación por API Key (header x-api-key) y compresión de datos.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -33,19 +33,18 @@ class ECFApiClient:
         Inicializa el cliente API.
         
         Args:
-            config: Configuración de la API (base_url, endpoint, username, password, timeout)
+            config: Configuración de la API (base_url, endpoint, api_key, timeout)
         """
         self.base_url = config.get("base_url", "").rstrip("/")
         self.endpoint = config.get("endpoint", "/private/ecf/dgii-send")
-        self.username = config.get("username")
-        self.password = config.get("password")
+        self.api_key = config.get("api_key")
         self.timeout = config.get("timeout_seconds", 30)
         
         # Validar configuración
         if not self.base_url:
             raise ValueError("base_url es requerido")
-        if not self.username or not self.password:
-            raise ValueError("username y password son requeridos para Basic Auth")
+        if not self.api_key:
+            raise ValueError("api_key es requerido para autenticación")
         
         # Cliente HTTP
         self._client: Optional[httpx.Client] = None
@@ -55,12 +54,12 @@ class ECFApiClient:
         if self._client is None:
             self._client = httpx.Client(
                 base_url=self.base_url,
-                auth=(self.username, self.password),
                 timeout=self.timeout,
                 headers={
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                     "User-Agent": "ECF-Agent/1.0",
+                    "x-api-key": self.api_key,
                 },
             )
         return self._client
@@ -76,6 +75,7 @@ class ECFApiClient:
         customer_rnc: str,
         invoices: List[Dict[str, Any]],
         compress: bool = True,
+        compression_method: str = "zstd",
     ) -> Dict[str, Any]:
         """
         Envía un batch de facturas a la API.
@@ -85,6 +85,7 @@ class ECFApiClient:
             invoices: Lista de facturas con estructura:
                       {rnc_buyer, ecf, total_amount, invoice_data}
             compress: Si comprimir los datos de cada factura
+            compression_method: Método de compresión ("gzip", "zstd", "none")
         
         Returns:
             Respuesta de la API
@@ -92,9 +93,13 @@ class ECFApiClient:
         Raises:
             APIError: Si hay error en el envío
         """
+        # Determinar método efectivo
+        effective_method = compression_method if compress else "none"
+        
         # Construir payload según el formato del endpoint
         payload = {
             "rnc_customer": customer_rnc,
+            "compression": effective_method,
             "invoices": [],
         }
         
@@ -105,17 +110,15 @@ class ECFApiClient:
                 "rnc_buyer": str(invoice.get("rnc_buyer", "")),
                 "ecf": str(invoice.get("ecf", "")),
                 "total_amount": str(invoice.get("total_amount", "0.00")),
-                "compress": compress,
+                "compression": effective_method,
             }
             
-            if compress:
-                invoice_payload["invoice_data"] = compress_data(invoice_data)
-            else:
-                invoice_payload["invoice_data"] = json.dumps(invoice_data)
+            # Comprimir usando el método especificado
+            invoice_payload["invoice_data"] = compress_data(invoice_data, method=effective_method)
             
             payload["invoices"].append(invoice_payload)
         
-        logger.info(f"Enviando {len(invoices)} facturas para RNC {customer_rnc}")
+        logger.info(f"Enviando {len(invoices)} facturas para RNC {customer_rnc} (compresión: {effective_method})")
         logger.debug(f"URL: {self.base_url}{self.endpoint}")
         
         try:
@@ -151,6 +154,7 @@ class ECFApiClient:
         customer_rnc: str,
         invoice: Dict[str, Any],
         compress: bool = True,
+        compression_method: str = "zstd",
     ) -> Dict[str, Any]:
         """
         Envía una sola factura a la API.
@@ -159,11 +163,12 @@ class ECFApiClient:
             customer_rnc: RNC del cliente (emisor)
             invoice: Factura con estructura {rnc_buyer, ecf, total_amount, invoice_data}
             compress: Si comprimir los datos
+            compression_method: Método de compresión
         
         Returns:
             Respuesta de la API
         """
-        return self.send_batch(customer_rnc, [invoice], compress)
+        return self.send_batch(customer_rnc, [invoice], compress, compression_method)
 
     def test_connection(self) -> bool:
         """

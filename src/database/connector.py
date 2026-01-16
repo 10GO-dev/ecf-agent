@@ -319,6 +319,79 @@ class SQLServerConnector(DatabaseConnector):
             cursor.close()
 
 
+class SQLiteConnector(DatabaseConnector):
+    """Conector para SQLite (para testing y pequeños despliegues)."""
+
+    def connect(self) -> None:
+        """Establece conexión a SQLite."""
+        import sqlite3
+        
+        db_path = self.config.get("database", ":memory:")
+        
+        try:
+            self.connection = sqlite3.connect(db_path)
+            # Habilitar acceso por nombre de columna
+            self.connection.row_factory = sqlite3.Row
+            logger.debug(f"Conectado a SQLite: {db_path}")
+        except Exception as e:
+            raise DatabaseError(f"Error conectando a SQLite: {e}")
+
+    def disconnect(self) -> None:
+        """Cierra conexión a SQLite."""
+        if self.connection:
+            self.connection.close()
+            self.connection = None
+            logger.debug("Desconectado de SQLite")
+
+    def execute_query(self, query: str, params: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        """Ejecuta SELECT en SQLite."""
+        if not self.connection:
+            raise DatabaseError("No hay conexión activa")
+        
+        cursor = self.connection.cursor()
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            rows = cursor.fetchall()
+            # Convertir sqlite3.Row a dict
+            return [dict(row) for row in rows]
+        finally:
+            cursor.close()
+
+    def execute_update(self, query: str, params: Optional[Dict] = None) -> int:
+        """Ejecuta UPDATE/INSERT/DELETE en SQLite."""
+        if not self.connection:
+            raise DatabaseError("No hay conexión activa")
+        
+        cursor = self.connection.cursor()
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            self.connection.commit()
+            return cursor.rowcount
+        finally:
+            cursor.close()
+
+    def test_connection(self) -> bool:
+        """Prueba la conexión a SQLite."""
+        try:
+            self.connect()
+            # En SQLite, verificar que la BD existe y es accesible
+            self.execute_query("SELECT 1")
+            logger.info("Conexión a SQLite exitosa")
+            return True
+        except Exception as e:
+            logger.error(f"Error de conexión a SQLite: {e}")
+            return False
+        finally:
+            self.disconnect()
+
+
 class OracleConnector(DatabaseConnector):
     """Conector para Oracle Database."""
 
@@ -384,6 +457,8 @@ DRIVERS = {
     "sqlserver": SQLServerConnector,
     "mssql": SQLServerConnector,
     "oracle": OracleConnector,
+    "sqlite": SQLiteConnector,
+    "sqlite3": SQLiteConnector,
 }
 
 

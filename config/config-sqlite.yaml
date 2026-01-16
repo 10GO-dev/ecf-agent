@@ -1,0 +1,152 @@
+# Configuración del Agente ECF - SQLite (Para pruebas locales)
+# 
+# Usar con la estructura real del cliente (basado en script.sql)
+# 
+# Para crear la BD de prueba:
+#   python scripts/setup_test_db.py
+#
+# Para ejecutar:
+#   python -m src.main run --config config/config-sqlite.yaml
+
+agent:
+  # RNC del cliente (emisor de los comprobantes)
+  customer_rnc: "130013454"
+  
+  # Intervalo de polling a la base de datos (segundos)
+  polling_interval_seconds: 10
+  
+  # Máximo de facturas por request al API
+  batch_size: 10
+  
+  # Intervalo de reintento para facturas fallidas (segundos)
+  retry_interval_seconds: 60
+  
+  # Máximo de reintentos antes de marcar como fallida
+  max_retries: 3
+
+# Conexión a la API de TekServices (mock para pruebas)
+api:
+  base_url: "https://tekservices.com.do"  # Mock server o API real
+  endpoint: "/private/test"
+  
+  # Autenticación por API Key
+  api_key: "sk_07e5967e51b53a1282782bf2a1a6db351382834a60a10e73d32edb5fcc7b8304"
+  
+  # Timeout para requests HTTP (segundos)
+  timeout_seconds: 30
+  
+  # Método de compresión: "zstd" | "gzip" | "none"
+  # zstd = MessagePack + zstd + base64 (optimizado, rápido) [DEFAULT]
+  # gzip = JSON + gzip + base64 (compatible, estándar)
+  # Para usar zstd: pip install msgpack zstandard
+  compression: "zstd"
+
+# Conexión a SQLite de prueba
+database:
+  driver: "sqlite"
+  database: "./data/test_invoices.db"
+  
+  # Query que genera JSON con estructura factura_db compatible
+  # Nota: SQLite usa json_object() y json_group_array() (requiere SQLite 3.38+)
+  query: |
+    SELECT 
+        e.transaccionid as id,
+        e.encf as ecf_number,
+        e.tipoecf as ecf_type,
+        e.RNCComprador as rnc_buyer,
+        e.MontoTotal as total_amount,
+        json_object(
+            'ECF', json_object(
+                'transaccionid', e.transaccionid,
+                'codalmacen', e.codalmacen,
+                'tipoecf', e.tipoecf,
+                'encf', e.encf,
+                'FechaVencimientoSecuencia', e.FechaVencimientoSecuencia,
+                'IndicadorNotaCredito', e.IndicadorNotaCredito,
+                'IndicadorEnvioDiferido', e.IndicadorEnvioDiferido,
+                'IndicadorMontoGravado', e.IndicadorMontoGravado,
+                'TipoIngresos', e.TipoIngresos,
+                'TipoPago', e.TipoPago,
+                'MontoPago', e.MontoPago,
+                'RNCEmisor', e.RNCEmisor,
+                'RazonSocialEmisor', e.RazonSocialEmisor,
+                'NombreComercial', e.NombreComercial,
+                'FechaEmision', e.FechaEmision,
+                'RNCComprador', e.RNCComprador,
+                'RazonSocialComprador', e.RazonSocialComprador,
+                'MontoGravadoTotal', e.MontoGravadoTotal,
+                'MontoGravadoI1', e.MontoGravadoI1,
+                'Itbistasa1', e.Itbistasa1,
+                'TotalITBIS', e.TotalITBIS,
+                'TotalITBIS1', e.TotalITBIS1,
+                'MontoTotal', e.MontoTotal,
+                'ValorPagar', e.ValorPagar,
+                'TipoMoneda', e.TipoMoneda,
+                'estado', e.estado,
+                'procesadadgii', e.procesadadgii
+            ),
+            'Detalles', (
+                SELECT json_group_array(
+                    json_object(
+                        'linea', d.linea,
+                        'NumeroLinea', d.NumeroLinea,
+                        'IndicadorFacturacion', d.IndicadorFacturacion,
+                        'tasaITBIS1', d.tasaITBIS1,
+                        'MontoITBIS1', d.MontoITBIS1,
+                        'TipoCodigo', d.TipoCodigo,
+                        'CodigoItem', d.CodigoItem,
+                        'NombreItem', d.NombreItem,
+                        'IndicadorBienoServicio', d.IndicadorBienoServicio,
+                        'CantidadItem', d.CantidadItem,
+                        'UnidadMedida', d.UnidadMedida,
+                        'PrecioUnitarioItem', d.PrecioUnitarioItem,
+                        'MontoItem', d.MontoItem
+                    )
+                )
+                FROM interfazencfdet d
+                WHERE d.transaccionid = e.transaccionid AND d.codalmacen = e.codalmacen
+            ),
+            'FormasPago', (
+                SELECT json_group_array(
+                    json_object(
+                        'formapagoid', f.formapagoid,
+                        'formapago', f.formapago,
+                        'montopago', f.montopago
+                    )
+                )
+                FROM ecfformapago f
+                WHERE f.transaccionid = e.transaccionid AND f.codalmacen = e.codalmacen
+            )
+        ) as invoice_json
+    FROM interfazencf e
+    WHERE e.estado = 'A'
+    ORDER BY e.transaccionid ASC
+    LIMIT {batch_size}
+  
+  # Campo que contiene el JSON de la factura
+  json_field: "invoice_json"
+  
+  # Campos de metadatos
+  id_field: "id"
+  ecf_field: "ecf_number"
+  type_field: "ecf_type"
+  rnc_buyer_field: "rnc_buyer"
+  total_field: "total_amount"
+  
+  # Query para marcar como procesada (estado: A=Activo, P=Procesado)
+  update_query: |
+    UPDATE interfazencf 
+    SET estado = 'P' 
+    WHERE transaccionid = {id}
+
+# Cola de reintentos
+queue:
+  db_path: "./data/retry_queue.db"
+
+# Configuración de logs
+logging:
+  level: "DEBUG"
+  file: "./logs/ecf-agent-test.log"
+  max_size_mb: 5
+  backup_count: 3
+  console: true

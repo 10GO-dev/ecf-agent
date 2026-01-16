@@ -19,3 +19,7 @@ loguru>=0.7
 
 # CLI
 click>=8.1
+
+# Compresión optimizada (opcional, para usar method="zstd")
+# msgpack>=1.0
+# zstandard>=0.21

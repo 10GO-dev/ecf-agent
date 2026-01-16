@@ -19,15 +19,20 @@ agent:
 
 # Conexión a la API de TekServices
 api:
-  base_url: "https://api.tekservices.com"
+  base_url: "https://tekservices.com.do"
   endpoint: "/private/ecf/dgii-send"
   
-  # Autenticación Basic Auth (usar variables de entorno)
-  username: "${ECF_API_USERNAME}"
-  password: "${ECF_API_PASSWORD}"
+  # Autenticación por API Key (usar variables de entorno)
+  api_key: "${ECF_API_KEY}"
   
   # Timeout para requests HTTP (segundos)
   timeout_seconds: 30
+  
+  # Método de compresión: "zstd" | "gzip" | "none"
+  # zstd = MessagePack + zstd + base64 (optimizado, rápido) [DEFAULT]
+  # gzip = JSON + gzip + base64 (compatible, estándar)
+  # Para usar zstd: pip install msgpack zstandard
+  compression: "zstd"
 
 # Conexión a la base de datos del cliente
 database:

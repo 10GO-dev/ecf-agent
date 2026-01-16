@@ -22,8 +22,7 @@ agent:
 api:
   base_url: "https://api.example.com"
   endpoint: "/private/ecf/dgii-send"
-  username: "test_user"
-  password: "test_pass"
+  api_key: "test_api_key_12345"
   
 database:
   driver: "mysql"
