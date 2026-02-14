@@ -137,6 +137,8 @@ class ECFAgent:
                             "invoice_data": invoice_data,  # Se comprimirá en el sender
                         }
                         
+                        # logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
+                        
                         invoices_to_send.append(invoice_payload)
                         invoice_ids.append(row.get(self.id_field))
                         

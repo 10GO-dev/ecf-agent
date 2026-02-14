@@ -24,13 +24,13 @@ agent:
   # Máximo de reintentos antes de marcar como fallida
   max_retries: 3
 
-# Conexión a la API de TekServices (mock para pruebas)
+# Conexión a la API de TekServices (local)
 api:
-  base_url: "https://tekservices.com.do"  # Mock server o API real
-  endpoint: "/private/test"
+  base_url: "http://localhost:3030"
+  endpoint: "/private/ecf/invoices"
   
-  # Autenticación por API Key
-  api_key: "sk_07e5967e51b53a1282782bf2a1a6db351382834a60a10e73d32edb5fcc7b8304"
+  # Autenticación por API Key (desde .env)
+  api_key: "${ECF_API_KEY}"
   
   # Timeout para requests HTTP (segundos)
   timeout_seconds: 30
@@ -56,7 +56,6 @@ database:
         e.RNCComprador as rnc_buyer,
         e.MontoTotal as total_amount,
         json_object(
-            'ECF', json_object(
                 'transaccionid', e.transaccionid,
                 'codalmacen', e.codalmacen,
                 'tipoecf', e.tipoecf,
@@ -67,40 +66,195 @@ database:
                 'IndicadorMontoGravado', e.IndicadorMontoGravado,
                 'TipoIngresos', e.TipoIngresos,
                 'TipoPago', e.TipoPago,
+                'FechaLimitePago', e.FechaLimitePago,
+                'Terminopago', e.Terminopago,
                 'MontoPago', e.MontoPago,
+                'TipoCuentaPago', e.TipoCuentaPago,
+                'NumeroCuentaPago', e.NumeroCuentaPago,
+                'BancoPago', e.BancoPago,
+                'FechaDesde', e.FechaDesde,
+                'FechaHasta', e.FechaHasta,
+                'TotalPaginas', e.TotalPaginas,
                 'RNCEmisor', e.RNCEmisor,
                 'RazonSocialEmisor', e.RazonSocialEmisor,
                 'NombreComercial', e.NombreComercial,
+                'Sucursal', e.Sucursal,
+                'DireccionEmisor', e.DireccionEmisor,
+                'Municipioemisor', e.Municipioemisor,
+                'Provincia', e.Provincia,
+                'TelefonoEmisor', e.TelefonoEmisor,
+                'CorreoEmisor', e.CorreoEmisor,
+                'WebSite', e.WebSite,
+                'ActividadEconomica', e.ActividadEconomica,
+                'CodigoVendedor', e.CodigoVendedor,
+                'NumeroFacturaInterna', e.NumeroFacturaInterna,
+                'NumeroPedidoInterno', e.NumeroPedidoInterno,
+                'ZonaVenta', e.ZonaVenta,
+                'RutaVenta', e.RutaVenta,
                 'FechaEmision', e.FechaEmision,
                 'RNCComprador', e.RNCComprador,
+                'IdentificadorExtranjero', e.IdentificadorExtranjero,
                 'RazonSocialComprador', e.RazonSocialComprador,
+                'ContactoComprador', e.ContactoComprador,
+                'CorreoComprador', e.CorreoComprador,
+                'DireccionComprador', e.DireccionComprador,
+                'MunicipioComprador', e.MunicipioComprador,
+                'ProvinciaComprador', e.ProvinciaComprador,
+                'PaisComprador', e.PaisComprador,
+                'FechaEntrega', e.FechaEntrega,
+                'ContactoEntrega', e.ContactoEntrega,
+                'DireccionEntrega', e.DireccionEntrega,
+                'TelefonoAdicionalcomprador', e.TelefonoAdicionalcomprador,
+                'FechaOrdenCompra', e.FechaOrdenCompra,
+                'NumeroOrdenCompra', e.NumeroOrdenCompra,
+                'CodigoInternoComprador', e.CodigoInternoComprador,
+                'ResponsablePago', e.ResponsablePago,
                 'MontoGravadoTotal', e.MontoGravadoTotal,
                 'MontoGravadoI1', e.MontoGravadoI1,
+                'MontoGravadoI2', e.MontoGravadoI2,
+                'MontoGravadoI3', e.MontoGravadoI3,
+                'MontoExento', e.MontoExento,
                 'Itbistasa1', e.Itbistasa1,
+                'Itbistasa2', e.Itbistasa2,
+                'Itbistasa3', e.Itbistasa3,
                 'TotalITBIS', e.TotalITBIS,
                 'TotalITBIS1', e.TotalITBIS1,
+                'TotalITBIS2', e.TotalITBIS2,
+                'TotalITBIS3', e.TotalITBIS3,
+                'MontoImpuestoAdicional', e.MontoImpuestoAdicional,
                 'MontoTotal', e.MontoTotal,
+                'MontoNoFacturable', e.MontoNoFacturable,
+                'MontoPeriodo', e.MontoPeriodo,
+                'SaldoAnterior', e.SaldoAnterior,
+                'MontoAvancePago', e.MontoAvancePago,
                 'ValorPagar', e.ValorPagar,
+                'TotalITBISRetenido', e.TotalITBISRetenido,
+                'TotalISRRetencion', e.TotalISRRetencion,
+                'TotalITBISPercepcion', e.TotalITBISPercepcion,
+                'TotalISRPercepcion', e.TotalISRPercepcion,
                 'TipoMoneda', e.TipoMoneda,
+                'TipoCambio', e.TipoCambio,
+                'MontoGravadoTotalOtraMoneda', e.MontoGravadoTotalOtraMoneda,
+                'MontoGravado1OtraMoneda', e.MontoGravado1OtraMoneda,
+                'MontoGravado2OtraMoneda', e.MontoGravado2OtraMoneda,
+                'MontoGravado3OtraMoneda', e.MontoGravado3OtraMoneda,
+                'MontoExentoOtraMoneda', e.MontoExentoOtraMoneda,
+                'TotalITBISOtraMoneda', e.TotalITBISOtraMoneda,
+                'TotalITBIS1OtraMoneda', e.TotalITBIS1OtraMoneda,
+                'TotalITBIS2OtraMoneda', e.TotalITBIS2OtraMoneda,
+                'TotalITBIS3OtraMoneda', e.TotalITBIS3OtraMoneda,
+                'MontoImpuestoAdicionalOtraMoneda', e.MontoImpuestoAdicionalOtraMoneda,
+                'TotalotraMoneda', e.TotalotraMoneda,
                 'estado', e.estado,
-                'procesadadgii', e.procesadadgii
-            ),
-            'Detalles', (
-                SELECT json_group_array(
+                'procesadadgii', e.procesadadgii,
+                'ImpuestosAdicionales', 
+                (SELECT json_group_array(objeto)
+                FROM (
+                    SELECT DISTINCT
+                        json_object(
+                            'tipoimpid', i.tipoimpid,
+                            'codimp', i.codimp,
+                            'tasaimp', i.tasaimp
+                        ) AS objeto
+                    FROM ecftipoimpadic i
+                    WHERE i.transaccionid = e.transaccionid
+                    AND i.codalmacen = e.codalmacen
+                ) AS t),
+
+                'Detalles', (
+                    SELECT json_group_array(
                     json_object(
                         'linea', d.linea,
                         'NumeroLinea', d.NumeroLinea,
                         'IndicadorFacturacion', d.IndicadorFacturacion,
+                        'IndicadorAgenteRetencionoPercepcion', d.IndicadorAgenteRetencionoPercepcion,
+                        'MontoITBISRetenido', d.MontoITBISRetenido,
+                        'MontoISRRetenido', d.MontoISRRetenido,
+                        'tipoimpuesto', d.tipoimpuesto,
                         'tasaITBIS1', d.tasaITBIS1,
+                        'tasaITBIS2', d.tasaITBIS2,
+                        'tasaITBIS3', d.tasaITBIS3,
+                        'tasaISC', d.tasaISC,
+                        'tasaISCAD', d.tasaISCAD,
+                        'tasaotroimp', d.tasaotroimp,
                         'MontoITBIS1', d.MontoITBIS1,
+                        'MontoITBIS2', d.MontoITBIS2,
+                        'MontoITBIS3', d.MontoITBIS3,
+                        'MontoISC', d.MontoISC,
+                        'MontoISCAd', d.MontoISCAd,
+                        'MontoOtrosImp', d.MontoOtrosImp,
+                        'tipoimpotramoneda', d.tipoimpotramoneda,
+                        'tasaITBIS1otramoneda', d.tasaITBIS1otramoneda,
+                        'tasaITBIS2otramoneda', d.tasaITBIS2otramoneda,
+                        'tasaITBIS3otramoneda', d.tasaITBIS3otramoneda,
+                        'tasaISCotramoneda', d.tasaISCotramoneda,
+                        'tasaISCADotramoneda', d.tasaISCADotramoneda,
+                        'tasaotroimpotramoneda', d.tasaotroimpotramoneda,
+                        'MontoITBIS1otramoneda', d.MontoITBIS1otramoneda,
+                        'MontoITBIS2otramoneda', d.MontoITBIS2otramoneda,
+                        'MontoITBIS3otramoneda', d.MontoITBIS3otramoneda,
+                        'MontoISCotramoneda', d.MontoISCotramoneda,
+                        'MontoISCAdotramoneda', d.MontoISCAdotramoneda,
+                        'MontoOtrosImpotramoneda', d.MontoOtrosImpotramoneda,
                         'TipoCodigo', d.TipoCodigo,
                         'CodigoItem', d.CodigoItem,
                         'NombreItem', d.NombreItem,
                         'IndicadorBienoServicio', d.IndicadorBienoServicio,
+                        'DescripcionItem', d.DescripcionItem,
                         'CantidadItem', d.CantidadItem,
                         'UnidadMedida', d.UnidadMedida,
+                        'CantidadReferencia', d.CantidadReferencia,
+                        'Subcantidad', d.Subcantidad,
+                        'CodigoSubCantidad', d.CodigoSubCantidad,
+                        'GradosAcohol', d.GradosAcohol,
+                        'PrecioUnitarioReferencia', d.PrecioUnitarioReferencia,
+                        'FechaElaboracion', d.FechaElaboracion,
+                        'FechaVencimientoItem', d.FechaVencimientoItem,
                         'PrecioUnitarioItem', d.PrecioUnitarioItem,
-                        'MontoItem', d.MontoItem
+                        'DescuentoMonto', d.DescuentoMonto,
+                        'PrecioOtraMoneda', d.PrecioOtraMoneda,
+                        'DescuentoOtraMoneda', d.DescuentoOtraMoneda,
+                        'MontoItemOtraMoneda', d.MontoItemOtraMoneda,
+                        'MontoItem', d.MontoItem,
+                        'NumeroSubTotal', d.NumeroSubTotal,
+                        'DescripcionSubtotal', d.DescripcionSubtotal,
+                        'Orden', d.Orden,
+                        'SubTotalMontoGravadoTotal', d.SubTotalMontoGravadoTotal,
+                        'SubTotalMontoGravadoI1', d.SubTotalMontoGravadoI1,
+                        'SubTotalMontoGravadoI2', d.SubTotalMontoGravadoI2,
+                        'SubTotalMontoGravadoI3', d.SubTotalMontoGravadoI3,
+                        'SubTotalITBIS1', d.SubTotalITBIS1,
+                        'SubTotalITBIS2', d.SubTotalITBIS2,
+                        'SubTotalITBIS3', d.SubTotalITBIS3,
+                        'SubTotalImpuestoAdicional', d.SubTotalImpuestoAdicional,
+                        'SubTotalExento', d.SubTotalExento,
+                        'MontoSubTotal', d.MontoSubTotal,
+                        
+                        'ImpuestosAdicionales', (
+                            SELECT json_group_array(
+                                json_object(
+                                    'codimp', i.codimp
+                                )
+                            )
+                            FROM ecftipoimpadic i
+                            WHERE i.transaccionid = d.transaccionid
+                              AND i.codalmacen = d.codalmacen
+                              AND i.linea = d.linea
+                        ),
+                        'SubDescuentos', (
+                        SELECT json_group_array(
+                            json_object(
+                                'subdescid', s.subdescid,
+                                'tiposubdesc', s.tiposubdesc,
+                                'porcentajedesc', s.porcentajedesc,
+                                'montosubdesc', s.montosubdesc
+                            )
+                        )
+                        FROM ecfsubdescuento s
+                        WHERE s.transaccionid = d.transaccionid
+                          AND s.codalmacen = d.codalmacen
+                          AND s.linea = d.linea
+                      )
                     )
                 )
                 FROM interfazencfdet d
