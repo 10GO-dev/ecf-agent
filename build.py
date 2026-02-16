@@ -31,10 +31,10 @@ def build():
     result = subprocess.run(cmd)
     
     if result.returncode == 0:
-        print("\n✅ Compilación exitosa!")
+        print("\n[OK] Compilacion exitosa!")
         print(f"Ejecutable generado en: {Path('dist/ecf-agent.exe').absolute()}")
     else:
-        print("\n❌ Error durante la compilación.")
+        print("\n[ERROR] Error durante la compilacion.")
         sys.exit(result.returncode)
 
 if __name__ == "__main__":
