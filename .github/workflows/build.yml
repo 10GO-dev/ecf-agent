@@ -1,0 +1,80 @@
+name: Build and Release Agent
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags, e.g. v1.0.0
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Executable (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        python build.py
+        # Rename for clarity
+        mv dist/ecf-agent.exe dist/ecf-agent-windows.exe
+
+    - name: Build Executable (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Ensure build.py uses python3 or run pyinstaller directly
+        python build.py
+        # Rename for clarity
+        mv dist/ecf-agent dist/ecf-agent-linux
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ecf-agent-${{ matrix.os }}
+        path: dist/ecf-agent*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download Windows Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ecf-agent-windows-latest
+        path: ./artifacts/windows
+
+    - name: Download Linux Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ecf-agent-ubuntu-latest
+        path: ./artifacts/linux
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        files: |
+          ./artifacts/windows/ecf-agent-windows.exe
+          ./artifacts/linux/ecf-agent-linux
+        generate_release_notes: true

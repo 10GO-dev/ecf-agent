@@ -19,6 +19,7 @@ from .database import create_connector
 from .queue import RetryQueue
 from .scheduler import JobManager
 from .sender import ECFApiClient
+from .updater import AutoUpdater
 
 
 class ECFAgent:
@@ -48,6 +49,7 @@ class ECFAgent:
             db_path=str(Path(config.get("queue.db_path", "./data/queue.db")))
         )
         self.job_manager = JobManager()
+        self.updater = AutoUpdater(config.agent)
         
         # Configuración del agente
         self.customer_rnc = config.get("agent.customer_rnc")
@@ -243,6 +245,13 @@ class ECFAgent:
         self.job_manager.add_retry_job(self.retry_invoices, retry_interval)
         self.job_manager.add_cleanup_job(self.cleanup, interval_hours=24)
         
+        # Configurar auto-actualización (check cada 4 horas)
+        # Siempre agendamos el check para poder notificar, aunque auto_update sea False
+        self.job_manager.add_job(
+             self.updater.check_and_update, 
+             interval_seconds=4 * 3600
+        )
+        
         # Configurar señales
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -250,6 +259,11 @@ class ECFAgent:
         self.running = True
         self.job_manager.start()
         
+        # Chequeo inicial de actualización
+        logger.info("Verificando actualizaciones al inicio...")
+        if self.updater.check_and_update():
+            return  # Si se actualizó, salir/reiniciar (solo pasa si enabled=True)
+
         # Ejecutar polling inicial
         self.poll_invoices()
         

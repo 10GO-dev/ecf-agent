@@ -199,6 +199,10 @@ class Config:
         if driver not in ("sqlite", "sqlite3"):
             required.append(("database.host", "Host de base de datos"))
         
+        # Validar auto-update
+        if self.get("agent.auto_update", False):
+            required.append(("agent.update_url", "URL de actualización"))
+        
         missing = []
         for key, description in required:
             if not self.get(key):
