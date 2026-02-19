@@ -164,11 +164,11 @@ class MySQLConnector(DatabaseConnector):
             
             self.connection = pymysql.connect(
                 host=self.config.get("host", "localhost"),
-                port=self.config.get("port", 3306),
+                port=int(self.config.get("port", 3306)),
                 user=self.config.get("username"),
                 password=self.config.get("password"),
                 database=self.config.get("database"),
-                charset="utf8mb4",
+                charset=self.config.get("charset", "utf8"),
                 cursorclass=pymysql.cursors.DictCursor,
             )
             logger.debug("Conectado a MySQL")
