@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
+import datetime
+from decimal import Decimal
 
 import click
 from loguru import logger
@@ -20,6 +22,20 @@ from .queue import RetryQueue
 from .scheduler import JobManager
 from .sender import ECFApiClient
 from .updater import AutoUpdater
+
+
+def sanitize_for_serialization(obj: Any) -> Any:
+    """Recursively converts Decimals and DateTimes to base types to allow JSON/MsgPack serialization."""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_serialization(v) for k, v in obj.items()}
+    elif isinstance(obj, list) or isinstance(obj, tuple):
+        return [sanitize_for_serialization(v) for v in obj]
+    elif isinstance(obj, Decimal):
+        # Es vital usar str() en lugar de float() para dinero, para no perder precisión
+        return str(obj)
+    elif isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+    return obj
 
 
 class ECFAgent:
@@ -180,6 +196,9 @@ class ECFAgent:
                             
                         if self.config.get("database.payments_query"):
                             invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
+                        
+                        # Sanitizar datos (Decimal -> float, datetime -> str) para serialización JSON/MsgPack
+                        invoice_data = sanitize_for_serialization(invoice_data)
                         
                         # Preparar estructura para envío
                         invoice_payload = {
