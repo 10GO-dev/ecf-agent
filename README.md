@@ -153,27 +153,40 @@ npm install @msgpack/msgpack zstd-codec
 
 ## Query SQL
 
-La query configurada debe:
-1. Retornar facturas NO procesadas
-2. Incluir un campo con el JSON completo de la factura
-3. Incluir campos de metadatos (id, ecf, rnc_buyer, total)
+El agente soporta dos modos de extracción de datos: **Nativo (Recomendado)** y **Pre-ensamblado**.
 
-Ejemplo para MySQL:
-```sql
-SELECT 
-    e.transaccionid as id,
-    e.encf as ecf_number,
-    e.RNCComprador as rnc_buyer,
-    e.MontoTotal as total_amount,
-    JSON_OBJECT(
-        'ECF', JSON_OBJECT(...),
-        'Detalles', (SELECT JSON_ARRAYAGG(...)),
-        'FormasPago', (SELECT JSON_ARRAYAGG(...))
-    ) as invoice_json
-FROM interfazencf e
-WHERE e.procesadadgii = 'N'
-LIMIT {batch_size}
+### 1. Extracción DB-Agnostic (Nativo)
+
+Este método es universal y funciona en cualquier base de datos (MySQL, PostgreSQL, SQL Server, Oracle, SQLite) sin requerir funciones JSON específicas del motor.
+
+La configuración define una consulta principal para las cabeceras y subconsultas usando un comodín de IDs para evitar problemas de N+1 queries. El agente agrupará y ensamblará el JSON final en memoria y de forma nativa.
+
+```yaml
+database:
+  # 1. Consulta principal de cabeceras (requiere alias si nombres de columna no coinciden)
+  query: |
+    SELECT *,
+           transaccionid as id,
+           encf as ecf_number,
+           RNCComprador as rnc_buyer,
+           MontoTotal as total_amount
+    FROM interfazencf
+    WHERE estado = 'A'
+    ORDER BY transaccionid ASC
+    LIMIT {batch_size}
+
+  # 2. Subconsultas DB-Agnostic para elementos hijos
+  details_query: |
+    SELECT * FROM interfazencfdet WHERE transaccionid IN ({ids})
+  
+  taxes_query: |
+    SELECT * FROM ecftipoimpadic WHERE transaccionid IN ({ids})
+    
+  payments_query: |
+    SELECT * FROM ecfformapago WHERE transaccionid IN ({ids})
 ```
+
+
 
 ## Uso
 

@@ -57,8 +57,7 @@ class ECFAgent:
         self.max_retries = config.get("agent.max_retries", 5)
         self.compression_method = config.get("api.compression", "zstd")
         
-        # Campos de la query
-        self.json_field = config.get("database.json_field", "invoice_json")
+        # Nombres de campos configurables para mapping
         self.id_field = config.get("database.id_field", "id")
         self.ecf_field = config.get("database.ecf_field", "ecf_number")
         self.type_field = config.get("database.type_field", "ecf_type")
@@ -115,20 +114,72 @@ class ECFAgent:
                 invoices_to_send = []
                 invoice_ids = []
                 
+                # Para evitar N+1 queries, primero recopilamos todos los IDs
+                for row in invoices:
+                    invoice_ids.append(row.get(self.id_field))
+                
+                # Mapeos para guardar resultados agrupados por transaccionid
+                grouped_details = {str(id_): [] for id_ in invoice_ids}
+                grouped_taxes = {str(id_): [] for id_ in invoice_ids}
+                grouped_payments = {str(id_): [] for id_ in invoice_ids}
+                
+                # Traer subqueries usando cláusula IN
+                ids_str = ",".join(str(id_) for id_ in invoice_ids)
+                
+                details_query = self.config.get("database.details_query")
+                if details_query:
+                    query = details_query.format(ids=ids_str)
+                    logger.debug(f"Ejecutando subquery details: {query}")
+                    try:
+                        details_res = self.db_connector.execute_query(query)
+                        for d in details_res:
+                            tid = str(d.get("transaccionid"))
+                            if tid in grouped_details:
+                                grouped_details[tid].append(d)
+                    except Exception as e:
+                        logger.error(f"Error en subquery details: {e}")
+
+                taxes_query = self.config.get("database.taxes_query")
+                if taxes_query:
+                    query = taxes_query.format(ids=ids_str)
+                    logger.debug(f"Ejecutando subquery taxes: {query}")
+                    try:
+                        taxes_res = self.db_connector.execute_query(query)
+                        for t in taxes_res:
+                            tid = str(t.get("transaccionid"))
+                            if tid in grouped_taxes:
+                                grouped_taxes[tid].append(t)
+                    except Exception as e:
+                        logger.error(f"Error en subquery taxes: {e}")
+
+                payments_query = self.config.get("database.payments_query")
+                if payments_query:
+                    query = payments_query.format(ids=ids_str)
+                    logger.debug(f"Ejecutando subquery payments: {query}")
+                    try:
+                        pay_res = self.db_connector.execute_query(query)
+                        for p in pay_res:
+                            tid = str(p.get("transaccionid"))
+                            if tid in grouped_payments:
+                                grouped_payments[tid].append(p)
+                    except Exception as e:
+                        logger.error(f"Error en subquery payments: {e}")
+
                 for row in invoices:
                     try:
-                        # Obtener el JSON de la factura
-                        invoice_json = row.get(self.json_field)
+                        row_id = str(row.get(self.id_field))
                         
-                        # Si es string, parsearlo
-                        if isinstance(invoice_json, str):
-                            invoice_data = json.loads(invoice_json)
-                        else:
-                            invoice_data = invoice_json
+                        # Ensamblamos el JSON nativamente
+                        invoice_data = dict(row)
                         
-                        if not invoice_data:
-                            logger.warning(f"Factura sin datos JSON: {row.get(self.id_field)}")
-                            continue
+                        if self.config.get("database.details_query"):
+                            invoice_data["Detalles"] = grouped_details.get(row_id, [])
+                        
+                        if self.config.get("database.taxes_query"):
+                            invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])
+                            
+                        if self.config.get("database.payments_query"):
+                            invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
                         
                         # Preparar estructura para envío
                         invoice_payload = {
@@ -139,10 +190,9 @@ class ECFAgent:
                             "invoice_data": invoice_data,  # Se comprimirá en el sender
                         }
                         
-                        # logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
+                        logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
                         
                         invoices_to_send.append(invoice_payload)
-                        invoice_ids.append(row.get(self.id_field))
                         
                     except json.JSONDecodeError as e:
                         logger.error(f"Error parseando JSON de factura: {e}")

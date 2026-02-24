@@ -257,9 +257,11 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     """)
     
     # ====== Insertar datos de prueba ======
+    import time
+    timestamp = str(int(time.time()))[-7:] # Generamos secuencia unica (7 digitos para sumar 12 con '3200' y el ID final)
     
     # Factura 1 - Consumo (tipo 32)
-    cursor.execute("""
+    cursor.execute(f"""
         INSERT INTO interfazencf (
             transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
             IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
@@ -268,7 +270,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            1, 2, '32', 'E320000000026', '31-12-2027',
+            1, 2, '32', 'E320000000035', '31-12-2027',
             '0', '0', '1', '01', '1', '1200.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '123456789', 'Consumidor Final',
             '1016.95', '1016.95', '18', '183.05', '183.05',
@@ -295,7 +297,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     """)
     
     # Factura 2 - Consumo (tipo 32)
-    cursor.execute("""
+    cursor.execute(f"""
         INSERT INTO interfazencf (
             transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
             IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
@@ -304,7 +306,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            2, 2, '32', 'E320000000027', '31-12-2027',
+            2, 2, '32', 'E320000000036', '31-12-2027',
             '0', '0', '1', '01', '1', '2500.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '987654321', 'Consumidor General',
             '2118.64', '2118.64', '18', '381.36', '381.36',
@@ -331,7 +333,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     """)
     
     # Factura 3 - Consumo (tipo 32)
-    cursor.execute("""
+    cursor.execute(f"""
         INSERT INTO interfazencf (
             transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
             IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
@@ -340,7 +342,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            3, 2, '32', 'E320000000028', '31-12-2027',
+            3, 2, '32', 'E320000000037', '31-12-2027',
             '0', '0', '1', '01', '1', '800.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '111222333', 'Consumidor Express',
             '677.97', '677.97', '18', '122.03', '122.03',
@@ -367,7 +369,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     """)
     
     # Factura 4 - Consumo ALTO (tipo 32) - OVER 250K threshold
-    cursor.execute("""
+    cursor.execute(f"""
         INSERT INTO interfazencf (
             transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
             IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
@@ -376,7 +378,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            4, 2, '32', 'E320000000029', '31-12-2027',
+            4, 2, '32', 'E320000000038', '31-12-2027',
             '0', '0', '1', '01', '1', '300000.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '444555666', 'Consumidor Premium',
             '254237.29', '254237.29', '18', '45762.71', '45762.71',
