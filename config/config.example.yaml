@@ -8,6 +8,9 @@ agent:
   # Intervalo de polling a la base de datos (segundos)
   polling_interval_seconds: 30
   
+  # Intervalo de sincronización de estados pendientes con el backend (segundos)
+  status_sync_interval_seconds: 300
+  
   # Máximo de facturas por request al API
   batch_size: 50
   
@@ -106,6 +109,28 @@ database:
     SET procesadadgii = 'S', 
         fecha_procesada = NOW() 
     WHERE transaccionid = {id}
+
+  # ============================================================
+  # QUERIES PARA SINCRONIZACIÓN DE ESTADOS (Fallback)
+  # ============================================================
+  # Query para obtener facturas que se enviaron pero están pendientes de estado DGII
+  pending_status_query: |
+    SELECT 
+      encf
+    FROM interfazencf 
+    WHERE procesadadgii = 'S' AND (estado = 'P' OR estado = '')
+    LIMIT {batch_size}
+
+  # Query para actualizar el estado cuando el backend responde
+  # Parámetros disponibles: {ecf}, {status}, {track_id}
+  # Nota: Hemos acordado temporalmente NO guardar el track_id en el ERP,
+  # por lo que solo actualizamos el estado.
+  # Parámetros disponibles: {ecf}, {status}, {track_id}, {error} (solo usar columnas existentes)
+  update_status_query: |
+    UPDATE interfazencf 
+    SET 
+      estado = '{status}'
+    WHERE encf = '{ecf}'
 
 # Configuración de logs
 logging:

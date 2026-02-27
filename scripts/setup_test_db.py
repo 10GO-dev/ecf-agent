@@ -133,8 +133,8 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             TotalITBIS3OtraMoneda TEXT,
             MontoImpuestoAdicionalOtraMoneda TEXT,
             TotalotraMoneda REAL,
-            estado TEXT NOT NULL DEFAULT 'A',
-            procesadadgii TEXT NOT NULL DEFAULT 'N',
+            estado TEXT NOT NULL DEFAULT '0',
+            procesadadgii TEXT NOT NULL DEFAULT '0',
             PRIMARY KEY (transaccionid, codalmacen)
         )
     """)
@@ -270,11 +270,11 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            1, 2, '32', 'E320000000035', '31-12-2027',
+            1, 2, '32', 'E320000000052', '31-12-2027',
             '0', '0', '1', '01', '1', '1200.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '123456789', 'Consumidor Final',
             '1016.95', '1016.95', '18', '183.05', '183.05',
-            '1200.00', '1200.00', 'DOP', 'A', 'N'
+            '1200.00', '1200.00', 'DOP', '0', '0'
         )
     """)
     
@@ -306,11 +306,11 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            2, 2, '32', 'E320000000036', '31-12-2027',
+            2, 2, '32', 'E320000000053', '31-12-2027',
             '0', '0', '1', '01', '1', '2500.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '987654321', 'Consumidor General',
             '2118.64', '2118.64', '18', '381.36', '381.36',
-            '2500.00', '2500.00', 'DOP', 'A', 'N'
+            '2500.00', '2500.00', 'DOP', '0', '0'
         )
     """)
     
@@ -342,11 +342,11 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            3, 2, '32', 'E320000000037', '31-12-2027',
+            3, 2, '32', 'E320000000054', '31-12-2027',
             '0', '0', '1', '01', '1', '800.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '111222333', 'Consumidor Express',
             '677.97', '677.97', '18', '122.03', '122.03',
-            '800.00', '800.00', 'DOP', 'A', 'N'
+            '800.00', '800.00', 'DOP', '0', '0'
         )
     """)
     
@@ -378,11 +378,11 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            4, 2, '32', 'E320000000038', '31-12-2027',
+            4, 2, '32', 'E320000000055', '31-12-2027',
             '0', '0', '1', '01', '1', '300000.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '444555666', 'Consumidor Premium',
             '254237.29', '254237.29', '18', '45762.71', '45762.71',
-            '300000.00', '300000.00', 'DOP', 'A', 'N'
+            '300000.00', '300000.00', 'DOP', '0', '0'
         )
     """)
     
@@ -407,7 +407,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     conn.commit()
     
     # Verificar datos insertados
-    cursor.execute("SELECT COUNT(*) FROM interfazencf WHERE estado = 'A'")
+    cursor.execute("SELECT COUNT(*) FROM interfazencf WHERE estado = '0'")
     pending_count = cursor.fetchone()[0]
     
     cursor.execute("SELECT COUNT(*) FROM interfazencfdet")

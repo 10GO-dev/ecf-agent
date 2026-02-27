@@ -239,8 +239,25 @@ class ECFAgent:
                     
                     logger.info(f"Batch enviado exitosamente: {len(invoices_to_send)} facturas")
                     
+                    # PROCESAMIENTO SÍNCRONO DE ESTADOS (Hot-Sync)
+                    # El backend debe retornar un arreglo "results" con el estado de cada ECF
+                    results = response.get("results", [])
+                    if results:
+                        logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
+                        for res in results:
+                            ecf = res.get("ecf")
+                            status = res.get("dgii_status") or res.get("status")
+                            track_id = res.get("dgii_track_id", "")
+                            
+                            if ecf and status:
+                                local_status = str(status)
+                                error_msg = res.get("dgii_error", "")
+                                if error_msg:
+                                    logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
+                                self.db_connector.update_invoice_status(ecf, local_status, track_id)
+                    
                 except Exception as e:
-                    logger.error(f"Error enviando batch: {e}")
+                    logger.error(f"Error enviando batch o actualizando estados: {e}")
                     
                     # Agregar a cola de reintentos
                     for i, invoice in enumerate(invoices_to_send):
@@ -256,6 +273,48 @@ class ECFAgent:
                 
         except Exception as e:
             logger.error(f"Error en polling: {e}")
+
+    def sync_statuses(self):
+        """
+        Trabajo de recuperación (Fallback Sync): 
+        Consulta al backend por el estado de las facturas que quedaron 'Pendientes'.
+        """
+        logger.debug("Verificando facturas pendientes de estado (Fallback Polling)...")
+        
+        try:
+            with self.db_connector:
+                pending_invoices = self.db_connector.get_pending_status_invoices(self.batch_size)
+                
+                if not pending_invoices:
+                    return
+                
+                # Extraemos solo los números de ECF
+                ecf_field_name = self.config.get("database.ecf_field", "encf")
+                ecfs_to_sync = [row.get(ecf_field_name) for row in pending_invoices if row.get(ecf_field_name)]
+                
+                if not ecfs_to_sync:
+                    logger.warning("Query de pendientes no retornó el campo ECF correcto.")
+                    return
+                
+                response = self.api_client.sync_status(self.customer_rnc, ecfs_to_sync)
+                
+                results = response.get("results", [])
+                if results:
+                    logger.info(f"Actualizando {len(results)} facturas desde sincronización asíncrona")
+                    for res in results:
+                        ecf = res.get("ecf")
+                        status = res.get("dgii_status") or res.get("status")
+                        track_id = res.get("dgii_track_id", "")
+                        
+                        if ecf and status:
+                            local_status = str(status)
+                            error_msg = res.get("dgii_error", "")
+                            if error_msg:
+                                logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
+                            self.db_connector.update_invoice_status(ecf, local_status, track_id)
+                            
+        except Exception as e:
+            logger.error(f"Error en sincronización de estados (Fallback): {e}")
 
     def retry_invoices(self):
         """
@@ -309,9 +368,11 @@ class ECFAgent:
         # Configurar trabajos
         polling_interval = self.config.get("agent.polling_interval_seconds", 30)
         retry_interval = self.config.get("agent.retry_interval_seconds", 300)
+        status_sync_interval = self.config.get("agent.status_sync_interval_seconds", 300)
         
         self.job_manager.add_polling_job(self.poll_invoices, polling_interval)
         self.job_manager.add_retry_job(self.retry_invoices, retry_interval)
+        self.job_manager.add_job(self.sync_statuses, interval_seconds=status_sync_interval)
         self.job_manager.add_cleanup_job(self.cleanup, interval_hours=24)
         
         # Configurar auto-actualización (check cada 4 horas)

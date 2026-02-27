@@ -124,6 +124,76 @@ class DatabaseConnector(ABC):
             logger.error(f"Error marcando factura {invoice_id} como procesada: {e}")
             return False
 
+    def get_pending_status_invoices(self, batch_size: int = 50) -> List[Dict[str, Any]]:
+        """
+        Obtiene facturas que están pendientes de recibir un estado final de la DGII.
+        
+        Args:
+            batch_size: Número máximo de facturas a obtener
+        
+        Returns:
+            Lista de facturas pendientes de estado
+        """
+        query_template = self.config.get("pending_status_query", "")
+        if not query_template:
+            logger.warning("No se ha configurado 'pending_status_query'. Se omite Fallback Polling.")
+            return []
+        
+        # Reemplazar placeholders si existen
+        # Como str.format falla si hay llaves JSON en la query (en algunos dialectos), usamos replace
+        query = query_template.replace("{batch_size}", str(batch_size))
+        
+        logger.debug(f"Ejecutando query de facturas con estado pendiente (limit={batch_size})")
+        try:
+            results = self.execute_query(query)
+            logger.info(f"Obtenidas {len(results)} facturas pendientes de estado")
+            return results
+        except Exception as e:
+            logger.error(f"Error consultando facturas pendientes de estado: {e}")
+            return []
+
+    def update_invoice_status(self, ecf_number: str, status: str, track_id: str = "", error_message: str = "") -> bool:
+        """
+        Actualiza el estado de la factura tras recibir respuesta de la DGII (Síncrono o Fallback).
+        
+        Args:
+            ecf_number: Número de comprobante e-CF
+            status: Estado devuelto por la DGII (ej. 'A', 'R', 'P')
+            track_id: Track ID de la DGII (opcional, si se decide guardar)
+            error_message: Mensaje de error de la DGII (opcional)
+        
+        Returns:
+            True si se actualizó correctamente
+        """
+        query_template = self.config.get("update_status_query", "")
+        
+        if not query_template:
+           logger.debug("No se ha configurado 'update_status_query'. No se actualizará el estado.")
+           return False
+           
+        # Evitar SQL injection básico y escapar comillas
+        safe_ecf = str(ecf_number).replace("'", "''")
+        safe_status = str(status).replace("'", "''")
+        safe_track_id = str(track_id).replace("'", "''") if track_id else ""
+        
+        query = query_template.format(
+            ecf=safe_ecf,
+            status=safe_status,
+            track_id=safe_track_id
+        )
+        
+        try:
+            rows = self.execute_update(query)
+            if rows > 0:
+                logger.debug(f"Estado actualizado para e-CF {ecf_number}: {status}")
+                return True
+            else:
+                logger.warning(f"No se encontró el e-CF {ecf_number} para actualizar su estado")
+                return False
+        except Exception as e:
+            logger.error(f"Error actualizando estado del e-CF {ecf_number}: {e}")
+            return False
+
     def test_connection(self) -> bool:
         """
         Prueba la conexión a la base de datos.

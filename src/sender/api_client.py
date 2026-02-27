@@ -170,6 +170,57 @@ class ECFApiClient:
         """
         return self.send_batch(customer_rnc, [invoice], compress, compression_method)
 
+    def sync_status(self, customer_rnc: str, ecf_numbers: List[str]) -> Dict[str, Any]:
+        """
+        Consulta el estado de uno o más ECFs al backend.
+        
+        Args:
+            customer_rnc: RNC del cliente (emisor)
+            ecf_numbers: Lista de números de comprobantes (e-CFs)
+        
+        Returns:
+            Respuesta de la API con los estados actuales
+        """
+        if not ecf_numbers:
+            return {"ok": True, "results": []}
+
+        payload = {
+            "rnc_customer": customer_rnc,
+            "ecfs": ecf_numbers,
+        }
+        
+        # Construir el endpoint de status-sync desde la base URL directamente
+        # para no depender de cómo esté configurado self.endpoint
+        status_endpoint = "/private/ecf/status-sync"
+        
+        logger.info(f"Consultando estado de {len(ecf_numbers)} ECFs...")
+        
+        try:
+            client = self._get_client()
+            response = client.post(status_endpoint, json=payload)
+            
+            try:
+                response_data = response.json()
+            except json.JSONDecodeError:
+                response_data = {"raw": response.text}
+            
+            if response.status_code == 200:
+                logger.info("Consulta de estados exitosa")
+                return response_data
+            else:
+                logger.error(f"Error en API al consultar estados: {response.status_code} - {response_data}")
+                raise APIError(
+                    f"Error {response.status_code}: {response_data}",
+                    status_code=response.status_code,
+                    response=response_data,
+                )
+        except httpx.TimeoutException:
+            logger.error(f"Timeout al consultar estados ({self.timeout}s)")
+            raise APIError(f"Timeout al consultar estados")
+        except httpx.RequestError as e:
+            logger.error(f"Error de conexión al consultar estados: {e}")
+            raise APIError(f"Error de conexión al consultar estados: {e}")
+
     def test_connection(self) -> bool:
         """
         Prueba la conexión a la API.

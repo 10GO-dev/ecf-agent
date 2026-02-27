@@ -55,7 +55,7 @@ database:
            RNCComprador as rnc_buyer,
            MontoTotal as total_amount
     FROM interfazencf
-    WHERE estado = 'A'
+    WHERE estado = '0'
     ORDER BY transaccionid ASC
     LIMIT {batch_size}
 
@@ -83,11 +83,20 @@ database:
   rnc_buyer_field: "rnc_buyer"
   total_field: "total_amount"
   
-  # Query para marcar como procesada (estado: A=Activo, P=Procesado)
+  # Query para marcar que la factura ya fue enviada al backend (antes de recibir estado DGII)
+  # Paramámetros disponibles: {id}
   update_query: |
     UPDATE interfazencf 
-    SET estado = 'P' 
+    SET estado = '1'
     WHERE transaccionid = {id}
+
+  # Query para actualizar el estado DGII y marcar como procesada
+  # Parámetros disponibles: {ecf}, {status}, {track_id}
+  update_status_query: |
+    UPDATE interfazencf 
+    SET estado = '1',
+        procesadadgii = '{status}'
+    WHERE encf = '{ecf}'
 
 # Cola de reintentos
 queue:
