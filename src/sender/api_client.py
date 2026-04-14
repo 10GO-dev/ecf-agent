@@ -38,6 +38,7 @@ class ECFApiClient:
         self.base_url = config.get("base_url", "").rstrip("/")
         self.endpoint = config.get("endpoint", "/private/ecf/dgii-send")
         self.api_key = config.get("api_key")
+        self.environment = config.get("environment", "DEV")
         self.timeout = config.get("timeout_seconds", 30)
         
         # Validar configuración
@@ -60,6 +61,7 @@ class ECFApiClient:
                     "Accept": "application/json",
                     "User-Agent": "ECF-Agent/1.0",
                     "x-api-key": self.api_key,
+                    "x-environment": self.environment,
                 },
             )
         return self._client

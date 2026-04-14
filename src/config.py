@@ -156,6 +156,9 @@ class Config:
     def api(self) -> Dict[str, Any]:
         """Configuración de la API."""
         api_config = self._config.get("api", {})
+        # Asegurar que el entorno tenga un valor por defecto
+        if "environment" not in api_config:
+            api_config["environment"] = "${ECF_ENVIRONMENT:DEV}"
         return self._resolve_env_vars(api_config)
 
     @property
@@ -189,6 +192,7 @@ class Config:
             ("agent.customer_rnc", "RNC del cliente"),
             ("api.base_url", "URL base de la API"),
             ("api.endpoint", "Endpoint de la API"),
+            ("api.environment", "Entorno (DEV, CERT, PROD)"),
             ("database.driver", "Driver de base de datos"),
             ("database.database", "Nombre/ruta de base de datos"),
             ("database.query", "Query de consulta"),
