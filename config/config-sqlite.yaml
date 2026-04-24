@@ -32,6 +32,9 @@ api:
   # Autenticación por API Key (desde .env)
   api_key: "${ECF_API_KEY}"
   
+  # Entorno del sistema (DEV, CERT, PROD)
+  environment: "${ECF_ENVIRONMENT:DEV}"
+  
   # Timeout para requests HTTP (segundos)
   timeout_seconds: 30
   

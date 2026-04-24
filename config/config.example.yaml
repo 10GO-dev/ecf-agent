@@ -23,10 +23,13 @@ agent:
 # Conexión a la API de TekServices
 api:
   base_url: "https://tekservices.com.do"
-  endpoint: "/private/ecf/dgii-send"
+  endpoint: "/private/ecf/invoices"
   
   # Autenticación por API Key (usar variables de entorno)
   api_key: "${ECF_API_KEY}"
+  
+  # Entorno del sistema (DEV, CERT, PROD)
+  environment: "${ECF_ENVIRONMENT:DEV}"
   
   # Timeout para requests HTTP (segundos)
   timeout_seconds: 30
@@ -42,10 +45,10 @@ database:
   # Driver: mysql | postgres | sqlserver | oracle
   driver: "mysql"
   
-  host: "localhost"
-  port: 3306
-  database: "facturacion"
-  username: "ecf_reader"
+  host: "${DB_HOST}"
+  port: "${DB_PORT}"
+  database: "${DB_NAME}"
+  username: "${DB_USER}"
   password: "${DB_PASSWORD}"
   
   # ============================================================
