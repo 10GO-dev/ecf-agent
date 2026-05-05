@@ -391,32 +391,36 @@ class ECFAgent:
         
         logger.info(f"Reintentando {len(pending)} facturas")
         
-        for item in pending:
-            try:
-                self.api_client.send_single(
-                    item["customer_rnc"],
-                    item["payload"],
-                    compress=True,
-                    compression_method=self.compression_method,
-                )
-                
-                # Éxito: actualizar BD y eliminar de cola
-                self.db_connector.mark_as_processed(item["invoice_id"])
-                self.retry_queue.remove(item["invoice_id"])
-                logger.info(f"Factura {item['invoice_id']} reenviada exitosamente y actualizada en ERP")
-                
-            except Exception as e:
-                # Actualizar contador de intentos
-                self.retry_queue.update_attempt(item["invoice_id"], str(e))
-                new_attempts = item["attempts"] + 1
-                logger.warning(
-                    f"Reintento fallido para {item['invoice_id']} "
-                    f"(intento {new_attempts}): {e}"
-                )
-                if new_attempts >= self.max_retries:
-                    logger.error(f"Factura {item['invoice_id']} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
-                    self.db_connector.mark_as_failed(item["invoice_id"], str(e))
-                    self.retry_queue.remove(item["invoice_id"])
+        try:
+            with self.db_connector:
+                for item in pending:
+                    try:
+                        self.api_client.send_single(
+                            item["customer_rnc"],
+                            item["payload"],
+                            compress=True,
+                            compression_method=self.compression_method,
+                        )
+                        
+                        # Éxito: actualizar BD y eliminar de cola
+                        self.db_connector.mark_as_processed(item["invoice_id"])
+                        self.retry_queue.remove(item["invoice_id"])
+                        logger.info(f"Factura {item['invoice_id']} reenviada exitosamente y actualizada en ERP")
+                        
+                    except Exception as e:
+                        # Actualizar contador de intentos
+                        self.retry_queue.update_attempt(item["invoice_id"], str(e))
+                        new_attempts = item["attempts"] + 1
+                        logger.warning(
+                            f"Reintento fallido para {item['invoice_id']} "
+                            f"(intento {new_attempts}): {e}"
+                        )
+                        if new_attempts >= self.max_retries:
+                            logger.error(f"Factura {item['invoice_id']} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
+                            self.db_connector.mark_as_failed(item["invoice_id"], str(e))
+                            self.retry_queue.remove(item["invoice_id"])
+        except Exception as e:
+            logger.error(f"Error general en hilo de reintentos: {e}")
 
     def cleanup(self):
         """Trabajo de limpieza: elimina facturas muy antiguas de la cola."""
