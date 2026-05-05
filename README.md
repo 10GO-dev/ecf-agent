@@ -173,7 +173,7 @@ database:
            RNCComprador as rnc_buyer,
            MontoTotal as total_amount
     FROM interfazencf
-    WHERE estado = 'A'
+    WHERE estado = '0' AND (procesadadgii = '0' OR procesadadgii = '' OR procesadadgii IS NULL)
     ORDER BY transaccionid ASC
     LIMIT {batch_size}
 

@@ -71,7 +71,7 @@ database:
         e.MontoTotal as total_amount,
         e.*
     FROM interfazencf e
-    WHERE e.procesadadgii = 'N' AND e.estado = 'A'
+    WHERE e.estado = '0' AND (e.procesadadgii = '0' OR e.procesadadgii = '' OR e.procesadadgii IS NULL)
     ORDER BY e.transaccionid ASC
     LIMIT {batch_size}
   
