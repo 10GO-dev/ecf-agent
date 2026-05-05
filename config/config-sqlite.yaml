@@ -26,7 +26,7 @@ agent:
 
 # Conexión a la API de TekServices (local)
 api:
-  base_url: "http://localhost:3030"
+  base_url: "${ECF_API_URL:http://localhost:3030}"
   endpoint: "/private/ecf/invoices"
   
   # Autenticación por API Key (desde .env)

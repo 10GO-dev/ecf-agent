@@ -22,7 +22,7 @@ agent:
 
 # Conexión a la API de TekServices
 api:
-  base_url: "https://tekservices.com.do"
+  base_url: "${ECF_API_URL:https://api.tekservices.com.do}"
   endpoint: "/private/ecf/invoices"
   
   # Autenticación por API Key (usar variables de entorno)
