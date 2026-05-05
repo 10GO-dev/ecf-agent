@@ -20,7 +20,7 @@ from .config import Config, ConfigError, load_config
 from .database import create_connector
 from .queue import RetryQueue
 from .scheduler import JobManager
-from .sender import ECFApiClient
+from .sender import ECFApiClient, APIError
 from .updater import AutoUpdater
 
 
@@ -269,8 +269,7 @@ class ECFAgent:
                                 if error_msg:
                                     logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                 self.db_connector.update_invoice_status(ecf, local_status, track_id)
-                    
-                    from .sender.api_client import APIError
+                    # Fin de procesamiento de batch exitoso
                 except APIError as e:
                     logger.error(f"Error de API enviando batch: {e}")
                     
