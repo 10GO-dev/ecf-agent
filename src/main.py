@@ -405,18 +405,18 @@ class ECFAgent:
                         # Éxito: actualizar BD y eliminar de cola
                         self.db_connector.mark_as_processed(item["invoice_id"])
                         self.retry_queue.remove(item["invoice_id"])
-                        logger.info(f"Factura {item['invoice_id']} reenviada exitosamente y actualizada en ERP")
+                        logger.info(f"Factura {item.get('ecf_number', item['invoice_id'])} (ID: {item['invoice_id']}) reenviada exitosamente y actualizada en ERP")
                         
                     except Exception as e:
                         # Actualizar contador de intentos
                         self.retry_queue.update_attempt(item["invoice_id"], str(e))
                         new_attempts = item["attempts"] + 1
                         logger.warning(
-                            f"Reintento fallido para {item['invoice_id']} "
+                            f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
                             f"(intento {new_attempts}): {e}"
                         )
                         if new_attempts >= self.max_retries:
-                            logger.error(f"Factura {item['invoice_id']} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
+                            logger.error(f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
                             self.db_connector.mark_as_failed(item["invoice_id"], str(e))
                             self.retry_queue.remove(item["invoice_id"])
         except Exception as e:
