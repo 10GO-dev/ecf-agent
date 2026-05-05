@@ -133,16 +133,111 @@ class ECFApiClient:
             except json.JSONDecodeError:
                 response_data = {"raw": response.text}
             
-            if response.status_code == 200:
-                logger.info(f"Batch enviado exitosamente")
-                return response_data
+            # Interceptar y asimilar DUPLICATE_INVOICE como éxito
+            if isinstance(response_data, dict):
+                errors = response_data.get("errors", [])
+                if isinstance(errors, list) and errors:
+                    for i in range(len(errors) - 1, -1, -1):
+                        err = errors[i]
+                        if isinstance(err, dict) and err.get("error") == "DUPLICATE_INVOICE":
+                            ecf = err.get("ecf")
+                            logger.info(f"Interceptado DUPLICATE_INVOICE para {ecf}. Asimilando como éxito.")
+                            if "results" not in response_data:
+                                response_data["results"] = []
+                            response_data["results"].append({
+                                "ecf": ecf,
+                                "status": "success",
+                                "dgii_status": "pending" 
+                            })
+                            errors.pop(i)
+                            
+                            if isinstance(response_data.get("invoices_failed"), int):
+                                response_data["invoices_failed"] = max(0, response_data["invoices_failed"] - 1)
+                            if isinstance(response_data.get("invoices_processed"), int):
+                                response_data["invoices_processed"] += 1
+                                
+                    if not errors and response.status_code == 422:
+                        response.status_code = 200
+                        response_data.pop("error", None)
+                        response_data.pop("message", None)
+
+            # Verificar condiciones de error incluso si HTTP 200
+            is_error = False
+            error_reason = None
+
+            def extract_error_detail(data: Any) -> Optional[str]:
+                if not isinstance(data, dict):
+                    return None
+
+                code = data.get("error") or data.get("code")
+                message = data.get("message")
+                if code or message:
+                    return f"{code}: {message}" if code else str(message)
+
+                errors = data.get("errors")
+                if isinstance(errors, list) and errors:
+                    first = errors[0]
+                    if isinstance(first, dict):
+                        first_code = first.get("error") or first.get("code")
+                        first_message = first.get("message")
+                        if first_code or first_message:
+                            return f"{first_code}: {first_message}" if first_code else str(first_message)
+
+                return None
+
+            if response.status_code != 200:
+                is_error = True
+                error_detail = extract_error_detail(response_data)
+                error_reason = f"HTTP {response.status_code}"
+                if error_detail:
+                    error_reason = f"{error_reason} - {error_detail}"
             else:
-                logger.error(f"Error en API: {response.status_code} - {response_data}")
+                if isinstance(response_data, dict):
+                    sc = response_data.get("statusCode") or response_data.get("status")
+                    if isinstance(sc, int) and sc != 200:
+                        is_error = True
+                        error_reason = f"statusCode in body: {sc}"
+
+                    invoices_failed = response_data.get("invoices_failed")
+                    if isinstance(invoices_failed, int) and invoices_failed > 0:
+                        is_error = True
+                        error_reason = f"invoices_failed={invoices_failed}"
+
+                    if response_data.get("error") or response_data.get("errors"):
+                        is_error = True
+                        if not error_reason:
+                            error_reason = "error field in response body"
+
+                    message = response_data.get("message")
+                    if isinstance(message, str) and "error" in message.lower():
+                        is_error = True
+                        if not error_reason:
+                            error_reason = "message indicates error"
+
+                    results = response_data.get("results") or response_data.get("invoices") or response_data.get("invoice_results")
+                    if isinstance(results, list):
+                        for r in results:
+                            if isinstance(r, dict):
+                                status = r.get("status")
+                                if isinstance(status, str) and status.lower() not in ("ok", "success", "processed", "200"):
+                                    is_error = True
+                                    error_reason = f"item status: {status}"
+                                    break
+                                if r.get("error") or r.get("errors"):
+                                    is_error = True
+                                    error_reason = "item error"
+                                    break
+
+            if is_error:
+                logger.error(f"API returned error-like response: {response.status_code} - {response_data} (reason: {error_reason})")
                 raise APIError(
                     f"Error {response.status_code}: {response_data}",
                     status_code=response.status_code,
                     response=response_data,
                 )
+
+            logger.info(f"Batch enviado exitosamente")
+            return response_data
                 
         except httpx.TimeoutException:
             logger.error(f"Timeout al enviar batch ({self.timeout}s)")

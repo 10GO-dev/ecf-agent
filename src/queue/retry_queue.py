@@ -181,6 +181,27 @@ class RetryQueue:
             logger.error(f"Error eliminando factura de cola: {e}")
             return False
 
+    def exists(self, invoice_id: str) -> bool:
+        """
+        Verifica si una factura existe en la cola.
+        
+        Args:
+            invoice_id: ID de la factura
+            
+        Returns:
+            True si existe, False de lo contrario
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "SELECT 1 FROM pending_invoices WHERE invoice_id = ?",
+                    (invoice_id,)
+                )
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error verificando existencia en cola: {e}")
+            return False
+
     def update_attempt(self, invoice_id: str, error_message: Optional[str] = None):
         """
         Actualiza el contador de intentos de una factura.

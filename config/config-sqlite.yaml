@@ -86,19 +86,37 @@ database:
   rnc_buyer_field: "rnc_buyer"
   total_field: "total_amount"
   
-  # Query para marcar que la factura ya fue enviada al backend (antes de recibir estado DGII)
+  # Mapeo numérico para el estado devuelto por la DGII
+  # Se inyectará en la variable {status}
+  status_mapping:
+    pending: 0
+    not_sent: 0
+    accepted: 1
+    conditional_accepted: 2
+    rejected: 3
+    error: 4
+    failed: 4
+
+  # Query para marcar que la factura ya fue leída/enviada al backend (estado interno ERP)
   # Paramámetros disponibles: {id}
   update_query: |
     UPDATE interfazencf 
     SET estado = '1'
     WHERE transaccionid = {id}
 
-  # Query para actualizar el estado DGII y marcar como procesada
+  # Query para marcar como error interno definitivo (Opcional)
+  # Variables disponibles: {id}, {error}
+  update_error_query: |
+    UPDATE interfazencf
+    SET estado = '2',
+        procesadadgii = '{error}'
+    WHERE transaccionid = {id}
+
+  # Query para actualizar el estado devuelto por la DGII (procesadadgii)
   # Parámetros disponibles: {ecf}, {status}, {track_id}
   update_status_query: |
     UPDATE interfazencf 
-    SET estado = '1',
-        procesadadgii = '{status}'
+    SET procesadadgii = '{status}'
     WHERE encf = '{ecf}'
 
 # Cola de reintentos

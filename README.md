@@ -23,7 +23,9 @@ graph LR
 
 - 🔌 Soporte multi-BD: MySQL, PostgreSQL, SQL Server, Oracle, SQLite
 - 📦 Compresión optimizada (MessagePack + zstd + base64)
-- 🔁 Cola de reintentos con SQLite
+- 🛡️ Alta Resiliencia: Manejo inteligente de fallos parciales, prevención de duplicados e idempotencia (self-healing).
+- 🔁 Cola de reintentos avanzada con SQLite (aislada de extracciones en curso).
+- 🔢 Mapeo dinámico de estados: Traduce automáticamente los estados de la DGII a valores numéricos (o custom) para el ERP.
 - ⚙️ Instalación como servicio (Windows/Linux)
 - 📊 CLI para gestión y monitoreo
 
@@ -184,9 +186,34 @@ database:
     
   payments_query: |
     SELECT * FROM ecfformapago WHERE transaccionid IN ({ids})
+
+### 2. Sincronización de Estados y Resiliencia
+
+El Agente ECF está diseñado para soportar fallos de red y caídas temporales garantizando que tu ERP y el backend estén siempre sincronizados:
+
+```yaml
+database:
+  # Mapeo numérico para el estado devuelto por la DGII.
+  # El Agente traduce "accepted" a "1", "error" a "4", etc.
+  status_mapping:
+    pending: 0
+    accepted: 1
+    conditional_accepted: 2
+    rejected: 3
+    error: 4
+
+  # Actualiza la factura en tu ERP apenas se envía al backend
+  update_query: |
+    UPDATE interfazencf SET estado = '1' WHERE transaccionid = {id}
+
+  # Actualiza el estado real de la DGII cuando el backend lo retorna
+  update_status_query: |
+    UPDATE interfazencf SET procesadadgii = '{status}' WHERE encf = '{ecf}'
+    
+  # (Opcional) Marca fallos definitivos si se agotan los reintentos permitidos
+  update_error_query: |
+    UPDATE interfazencf SET estado = '2', mensaje_error = '{error}' WHERE transaccionid = {id}
 ```
-
-
 
 ## Uso
 

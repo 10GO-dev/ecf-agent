@@ -124,6 +124,19 @@ class ECFAgent:
                     logger.debug("No hay facturas pendientes")
                     return
                 
+                # Filtrar facturas que ya están en la cola de reintentos (evitar doble envío)
+                filtered_invoices = []
+                for row in invoices:
+                    invoice_id = str(row.get(self.id_field))
+                    if self.retry_queue.exists(invoice_id):
+                        continue
+                    filtered_invoices.append(row)
+                
+                invoices = filtered_invoices
+                if not invoices:
+                    logger.debug("Todas las facturas pendientes están bajo gestión de reintentos")
+                    return
+                
                 logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
                 
                 # Preparar datos para envío
@@ -250,16 +263,62 @@ class ECFAgent:
                             track_id = res.get("dgii_track_id", "")
                             
                             if ecf and status:
-                                local_status = str(status)
+                                mapping = self.config.get("database.status_mapping", {})
+                                local_status = str(mapping.get(status.lower(), status))
                                 error_msg = res.get("dgii_error", "")
                                 if error_msg:
                                     logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                 self.db_connector.update_invoice_status(ecf, local_status, track_id)
                     
-                except Exception as e:
-                    logger.error(f"Error enviando batch o actualizando estados: {e}")
+                    from .sender.api_client import APIError
+                except APIError as e:
+                    logger.error(f"Error de API enviando batch: {e}")
                     
-                    # Agregar a cola de reintentos
+                    response_data = getattr(e, 'response', {}) or {}
+                    errors_list = response_data.get("errors", [])
+                    failed_ecfs = {err.get("ecf") for err in errors_list if isinstance(err, dict) and "ecf" in err}
+                    results_list = response_data.get("results", []) or response_data.get("invoices", [])
+                    success_ecfs = {res.get("ecf") for res in results_list if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")}
+                    
+                    if not failed_ecfs and not success_ecfs:
+                        # Fallo completo (ej. Timeout, 500)
+                        for i, invoice in enumerate(invoices_to_send):
+                            self.retry_queue.add(
+                                invoice_id=str(invoice_ids[i]),
+                                customer_rnc=self.customer_rnc,
+                                payload=invoice,
+                                ecf_type=invoice.get("ecf_type"),
+                                ecf_number=invoice.get("ecf"),
+                                error_message=str(e),
+                            )
+                        logger.info(f"{len(invoices_to_send)} facturas agregadas a cola de reintentos por fallo general")
+                    else:
+                        # Fallo parcial
+                        added_to_retry = 0
+                        for i, invoice in enumerate(invoices_to_send):
+                            ecf_num = invoice.get("ecf")
+                            invoice_id = str(invoice_ids[i])
+                            
+                            if ecf_num in failed_ecfs or (ecf_num not in success_ecfs):
+                                # Asumir fallo si explícitamente falló o no vino en results
+                                self.retry_queue.add(
+                                    invoice_id=invoice_id,
+                                    customer_rnc=self.customer_rnc,
+                                    payload=invoice,
+                                    ecf_type=invoice.get("ecf_type"),
+                                    ecf_number=ecf_num,
+                                    error_message="Fallo parcial en batch",
+                                )
+                                added_to_retry += 1
+                            else:
+                                # Tuvo éxito a pesar del error general
+                                self.db_connector.mark_as_processed(invoice_id)
+                        logger.info(f"{added_to_retry} facturas enviadas a cola de reintentos por fallo parcial")
+                
+                except Exception as e:
+                    logger.error(f"Error genérico enviando batch o actualizando estados: {e}")
+                    
+                    # Agregar a cola de reintentos (Fallo general)
                     for i, invoice in enumerate(invoices_to_send):
                         self.retry_queue.add(
                             invoice_id=str(invoice_ids[i]),
@@ -307,7 +366,8 @@ class ECFAgent:
                         track_id = res.get("dgii_track_id", "")
                         
                         if ecf and status:
-                            local_status = str(status)
+                            mapping = self.config.get("database.status_mapping", {})
+                            local_status = str(mapping.get(status.lower(), status))
                             error_msg = res.get("dgii_error", "")
                             if error_msg:
                                 logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
@@ -341,17 +401,23 @@ class ECFAgent:
                     compression_method=self.compression_method,
                 )
                 
-                # Éxito: eliminar de cola
+                # Éxito: actualizar BD y eliminar de cola
+                self.db_connector.mark_as_processed(item["invoice_id"])
                 self.retry_queue.remove(item["invoice_id"])
-                logger.info(f"Factura {item['invoice_id']} reenviada exitosamente")
+                logger.info(f"Factura {item['invoice_id']} reenviada exitosamente y actualizada en ERP")
                 
             except Exception as e:
                 # Actualizar contador de intentos
                 self.retry_queue.update_attempt(item["invoice_id"], str(e))
+                new_attempts = item["attempts"] + 1
                 logger.warning(
                     f"Reintento fallido para {item['invoice_id']} "
-                    f"(intento {item['attempts'] + 1}): {e}"
+                    f"(intento {new_attempts}): {e}"
                 )
+                if new_attempts >= self.max_retries:
+                    logger.error(f"Factura {item['invoice_id']} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
+                    self.db_connector.mark_as_failed(item["invoice_id"], str(e))
+                    self.retry_queue.remove(item["invoice_id"])
 
     def cleanup(self):
         """Trabajo de limpieza: elimina facturas muy antiguas de la cola."""

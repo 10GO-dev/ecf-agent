@@ -124,6 +124,37 @@ class DatabaseConnector(ABC):
             logger.error(f"Error marcando factura {invoice_id} como procesada: {e}")
             return False
 
+    def mark_as_failed(self, invoice_id: Any, error_message: str) -> bool:
+        """
+        Marca una factura como fallida en el ERP después de superar los reintentos.
+        
+        Args:
+            invoice_id: ID de la factura
+            error_message: Mensaje de error final
+            
+        Returns:
+            True si se actualizó correctamente, False si no hay query configurada o falló
+        """
+        query_template = self.config.get("update_error_query", "")
+        if not query_template:
+            logger.debug(f"No se configuró 'update_error_query'. No se marcará la factura {invoice_id} como fallida en ERP.")
+            return False
+            
+        safe_error = str(error_message).replace("'", "''")
+        query = query_template.format(id=invoice_id, error=safe_error)
+        
+        try:
+            rows = self.execute_update(query)
+            if rows > 0:
+                logger.warning(f"Factura {invoice_id} marcada como fallida definitivamente en ERP")
+                return True
+            else:
+                logger.warning(f"No se encontró la factura {invoice_id} para marcarla como fallida")
+                return False
+        except Exception as e:
+            logger.error(f"Error marcando factura {invoice_id} como fallida: {e}")
+            return False
+
     def get_pending_status_invoices(self, batch_size: int = 50) -> List[Dict[str, Any]]:
         """
         Obtiene facturas que están pendientes de recibir un estado final de la DGII.

@@ -107,10 +107,31 @@ database:
   
   # Query para marcar como procesada
   # Variables disponibles: {id}
+  # Mapeo numérico para el estado devuelto por la DGII
+  # Se inyectará en la variable {status}
+  status_mapping:
+    pending: 0
+    not_sent: 0
+    accepted: 1
+    conditional_accepted: 2
+    rejected: 3
+    error: 4
+    failed: 4
+
+  # Query para marcar que la factura ya fue leída/enviada al backend (estado interno ERP)
+  # Variables disponibles: {id}
   update_query: |
     UPDATE interfazencf 
-    SET procesadadgii = 'S', 
+    SET estado = '1', 
         fecha_procesada = NOW() 
+    WHERE transaccionid = {id}
+
+  # Query para marcar como error interno definitivo (Opcional)
+  # Variables disponibles: {id}, {error}
+  update_error_query: |
+    UPDATE interfazencf
+    SET estado = '2',
+        mensaje_error = '{error}'
     WHERE transaccionid = {id}
 
   # ============================================================
@@ -118,21 +139,16 @@ database:
   # ============================================================
   # Query para obtener facturas que se enviaron pero están pendientes de estado DGII
   pending_status_query: |
-    SELECT 
-      encf
+    SELECT encf
     FROM interfazencf 
-    WHERE procesadadgii = 'S' AND (estado = 'P' OR estado = '')
+    WHERE estado = '1' AND (procesadadgii = '0' OR procesadadgii = '' OR procesadadgii IS NULL)
     LIMIT {batch_size}
 
-  # Query para actualizar el estado cuando el backend responde
-  # Parámetros disponibles: {ecf}, {status}, {track_id}
-  # Nota: Hemos acordado temporalmente NO guardar el track_id en el ERP,
-  # por lo que solo actualizamos el estado.
-  # Parámetros disponibles: {ecf}, {status}, {track_id}, {error} (solo usar columnas existentes)
+  # Query para actualizar el estado devuelto por la DGII
+  # Parámetros disponibles: {ecf}, {status}, {track_id}, {error}
   update_status_query: |
     UPDATE interfazencf 
-    SET 
-      estado = '{status}'
+    SET procesadadgii = '{status}'
     WHERE encf = '{ecf}'
 
 # Configuración de logs
