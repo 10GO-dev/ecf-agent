@@ -122,8 +122,7 @@ database:
   # Variables disponibles: {id}
   update_query: |
     UPDATE interfazencf 
-    SET estado = '1', 
-        fecha_procesada = NOW() 
+    SET estado = '1'
     WHERE transaccionid = {id}
 
   # Query para marcar como error interno definitivo (Opcional)
