@@ -24,6 +24,6 @@ click>=8.1
 requests>=2.31
 packaging>=23.0
 
-# Compresión optimizada (opcional, para usar method="zstd")
-# msgpack>=1.0
-# zstandard>=0.21
+# Compresión optimizada (para usar method="zstd")
+msgpack>=1.0
+zstandard>=0.21
