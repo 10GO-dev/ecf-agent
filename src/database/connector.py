@@ -124,35 +124,53 @@ class DatabaseConnector(ABC):
             logger.error(f"Error marcando factura {invoice_id} como procesada: {e}")
             return False
 
-    def mark_as_failed(self, invoice_id: Any, error_message: str) -> bool:
+    def mark_as_failed(
+        self,
+        ecf_number: Any,
+        error_message: str,
+        invoice_id: Any = None,
+        status_override: Optional[str] = None,
+    ) -> bool:
         """
         Marca una factura como fallida en el ERP después de superar los reintentos.
         
         Args:
-            invoice_id: ID de la factura
+            ecf_number: Numero de comprobante e-CF
             error_message: Mensaje de error final
+            invoice_id: ID interno de la factura (opcional)
+            status_override: Estado opcional si el query usa {status}
             
         Returns:
             True si se actualizó correctamente, False si no hay query configurada o falló
         """
         query_template = self.config.get("update_error_query", "")
         if not query_template:
-            logger.debug(f"No se configuró 'update_error_query'. No se marcará la factura {invoice_id} como fallida en ERP.")
+            logger.debug(
+                f"No se configuró 'update_error_query'. No se marcará la factura {ecf_number} como fallida en ERP."
+            )
             return False
             
         safe_error = str(error_message).replace("'", "''")
-        query = query_template.format(id=invoice_id, error=safe_error)
+        safe_ecf = str(ecf_number).replace("'", "''")
+        safe_id = str(invoice_id).replace("'", "''") if invoice_id is not None else ""
+        safe_status = str(status_override).replace("'", "''") if status_override is not None else ""
+        query = query_template.format(
+            ecf=safe_ecf,
+            id=safe_id,
+            error=safe_error,
+            status=safe_status,
+        )
         
         try:
             rows = self.execute_update(query)
             if rows > 0:
-                logger.warning(f"Factura {invoice_id} marcada como fallida definitivamente en ERP")
+                logger.warning(f"Factura {ecf_number} marcada como fallida definitivamente en ERP")
                 return True
             else:
-                logger.warning(f"No se encontró la factura {invoice_id} para marcarla como fallida")
+                logger.warning(f"No se encontró la factura {ecf_number} para marcarla como fallida")
                 return False
         except Exception as e:
-            logger.error(f"Error marcando factura {invoice_id} como fallida: {e}")
+            logger.error(f"Error marcando factura {ecf_number} como fallida: {e}")
             return False
 
     def get_pending_status_invoices(self, batch_size: int = 50) -> List[Dict[str, Any]]:
@@ -206,11 +224,13 @@ class DatabaseConnector(ABC):
         safe_ecf = str(ecf_number).replace("'", "''")
         safe_status = str(status).replace("'", "''")
         safe_track_id = str(track_id).replace("'", "''") if track_id else ""
+        safe_error = str(error_message).replace("'", "''") if error_message else ""
         
         query = query_template.format(
             ecf=safe_ecf,
             status=safe_status,
-            track_id=safe_track_id
+            track_id=safe_track_id,
+            error=safe_error,
         )
         
         try:

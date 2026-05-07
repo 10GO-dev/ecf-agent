@@ -72,6 +72,32 @@ class ECFAgent:
         self.batch_size = config.get("agent.batch_size", 50)
         self.max_retries = config.get("agent.max_retries", 5)
         self.compression_method = config.get("api.compression", "zstd")
+
+        # Validacion de errores no reintentables
+        default_validation_codes = {
+            "INVALID_ECF_TYPE",
+            "MISSING_JSONATA",
+            "MISSING_CERTIFICATE",
+            "NO_BUYER_RNC",
+            "INVALID_ECF_FORMAT",
+            "INVALID_FORMAT",
+            "INVALID_COMPRESSION",
+            "INVALID_PAYLOAD",
+            "FORBIDDEN",
+            "UNAUTHORIZED",
+        }
+        extra_validation_codes = config.get("agent.validation_error_codes", [])
+        if not isinstance(extra_validation_codes, list):
+            extra_validation_codes = []
+        self.validation_error_codes = {
+            str(code).upper() for code in default_validation_codes
+        }
+        self.validation_error_codes.update(
+            str(code).upper() for code in extra_validation_codes
+        )
+        self.validation_error_status = str(
+            config.get("database.validation_error_status", "2")
+        )
         
         # Nombres de campos configurables para mapping
         self.id_field = config.get("database.id_field", "id")
@@ -108,6 +134,70 @@ class ECFAgent:
                 retention=log_config.get("backup_count", 5),
                 compression="zip",
             )
+
+    def _is_validation_error(self, error_item: Dict[str, Any]) -> bool:
+        code = str(error_item.get("error") or error_item.get("code") or "").strip().upper()
+        if code:
+            if code in self.validation_error_codes:
+                return True
+            if code.startswith(("INVALID_", "MISSING_")):
+                return True
+
+        message = str(error_item.get("message") or "").lower()
+        if "mismatch" in message or "invalid" in message:
+            return True
+
+        return False
+
+    def _handle_validation_errors(
+        self,
+        errors_list: Any,
+        ecf_to_id: Dict[str, str],
+        remove_from_retry: bool = False,
+    ) -> set:
+        validation_ecfs = set()
+
+        if not isinstance(errors_list, list):
+            return validation_ecfs
+
+        for err in errors_list:
+            if not isinstance(err, dict):
+                continue
+
+            ecf = err.get("ecf")
+            if not ecf:
+                continue
+
+            if not self._is_validation_error(err):
+                continue
+
+            validation_ecfs.add(ecf)
+            invoice_id = ecf_to_id.get(ecf)
+            error_message = err.get("message") or err.get("error") or "Validation error"
+
+            updated = self.db_connector.mark_as_failed(
+                ecf,
+                error_message,
+                invoice_id,
+                status_override=self.validation_error_status,
+            )
+            if not updated:
+                self.db_connector.update_invoice_status(
+                    ecf,
+                    self.validation_error_status,
+                    error_message=error_message,
+                )
+
+            if remove_from_retry and invoice_id:
+                self.retry_queue.remove(invoice_id)
+
+        if validation_ecfs:
+            logger.warning(
+                f"{len(validation_ecfs)} facturas con error de validacion. "
+                f"Marcadas con estado {self.validation_error_status} para no reintentar."
+            )
+
+        return validation_ecfs
 
     def poll_invoices(self):
         """
@@ -146,6 +236,13 @@ class ECFAgent:
                 # Para evitar N+1 queries, primero recopilamos todos los IDs
                 for row in invoices:
                     invoice_ids.append(row.get(self.id_field))
+
+                # Mapeo ECF -> ID para actualizaciones puntuales
+                ecf_to_id = {}
+                for row in invoices:
+                    ecf_value = str(row.get(self.ecf_field, ""))
+                    if ecf_value:
+                        ecf_to_id[ecf_value] = str(row.get(self.id_field))
                 
                 # Mapeos para guardar resultados agrupados por transaccionid
                 grouped_details = {str(id_): [] for id_ in invoice_ids}
@@ -255,29 +352,57 @@ class ECFAgent:
                     # PROCESAMIENTO SÍNCRONO DE ESTADOS (Hot-Sync)
                     # El backend debe retornar un arreglo "results" con el estado de cada ECF
                     results = response.get("results", [])
+                    ecf_to_id = {
+                        invoice.get("ecf"): str(invoice_ids[i])
+                        for i, invoice in enumerate(invoices_to_send)
+                        if invoice.get("ecf")
+                    }
                     if results:
                         logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
                         for res in results:
                             ecf = res.get("ecf")
                             status = res.get("dgii_status") or res.get("status")
                             track_id = res.get("dgii_track_id", "")
+                            error_msg = res.get("dgii_error", "")
                             
                             if ecf and status:
                                 mapping = self.config.get("database.status_mapping", {})
-                                local_status = str(mapping.get(status.lower(), status))
-                                error_msg = res.get("dgii_error", "")
+                                status_key = str(status).lower()
+                                if status_key not in mapping:
+                                    if status_key == "error" and error_msg:
+                                        invoice_id = ecf_to_id.get(ecf)
+                                        self.db_connector.mark_as_failed(ecf, error_msg, invoice_id)
+                                    else:
+                                        logger.info(
+                                            f"Estado no-DGII '{status}' para {ecf}; se omite actualizar procesadadgii"
+                                        )
+                                    continue
+                                local_status = str(mapping.get(status_key))
                                 if error_msg:
                                     logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                 self.db_connector.update_invoice_status(ecf, local_status, track_id)
                     # Fin de procesamiento de batch exitoso
                 except APIError as e:
                     logger.error(f"Error de API enviando batch: {e}")
-                    
-                    response_data = getattr(e, 'response', {}) or {}
-                    errors_list = response_data.get("errors", [])
+
+                    response_data = getattr(e, "response", {}) or {}
+                    errors_list = (
+                        response_data.get("errors", []) if isinstance(response_data, dict) else []
+                    )
+                    validation_ecfs = self._handle_validation_errors(errors_list, ecf_to_id)
+
                     failed_ecfs = {err.get("ecf") for err in errors_list if isinstance(err, dict) and "ecf" in err}
-                    results_list = response_data.get("results", []) or response_data.get("invoices", [])
-                    success_ecfs = {res.get("ecf") for res in results_list if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")}
+                    results_list = (
+                        response_data.get("results", []) or response_data.get("invoices", [])
+                    ) if isinstance(response_data, dict) else []
+                    success_ecfs = {
+                        res.get("ecf")
+                        for res in results_list
+                        if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")
+                    }
+
+                    if validation_ecfs:
+                        failed_ecfs = {ecf for ecf in failed_ecfs if ecf not in validation_ecfs}
                     
                     if not failed_ecfs and not success_ecfs:
                         # Fallo completo (ej. Timeout, 500)
@@ -297,6 +422,9 @@ class ECFAgent:
                         for i, invoice in enumerate(invoices_to_send):
                             ecf_num = invoice.get("ecf")
                             invoice_id = str(invoice_ids[i])
+
+                            if ecf_num in validation_ecfs:
+                                continue
                             
                             if ecf_num in failed_ecfs or (ecf_num not in success_ecfs):
                                 # Asumir fallo si explícitamente falló o no vino en results
@@ -349,6 +477,11 @@ class ECFAgent:
                 # Extraemos solo los números de ECF
                 ecf_field_name = self.config.get("database.ecf_field", "encf")
                 ecfs_to_sync = [row.get(ecf_field_name) for row in pending_invoices if row.get(ecf_field_name)]
+                ecf_to_id = {
+                    row.get(ecf_field_name): row.get("id")
+                    for row in pending_invoices
+                    if row.get(ecf_field_name) and row.get("id")
+                }
                 
                 if not ecfs_to_sync:
                     logger.warning("Query de pendientes no retornó el campo ECF correcto.")
@@ -363,11 +496,21 @@ class ECFAgent:
                         ecf = res.get("ecf")
                         status = res.get("dgii_status") or res.get("status")
                         track_id = res.get("dgii_track_id", "")
+                        error_msg = res.get("dgii_error", "")
                         
                         if ecf and status:
                             mapping = self.config.get("database.status_mapping", {})
-                            local_status = str(mapping.get(status.lower(), status))
-                            error_msg = res.get("dgii_error", "")
+                            status_key = str(status).lower()
+                            if status_key not in mapping:
+                                if status_key == "error" and error_msg:
+                                    invoice_id = ecf_to_id.get(ecf)
+                                    self.db_connector.mark_as_failed(ecf, error_msg, invoice_id)
+                                else:
+                                    logger.info(
+                                        f"Estado no-DGII '{status}' para {ecf}; se omite actualizar procesadadgii"
+                                    )
+                                continue
+                            local_status = str(mapping.get(status_key))
                             if error_msg:
                                 logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                             self.db_connector.update_invoice_status(ecf, local_status, track_id)
@@ -406,7 +549,40 @@ class ECFAgent:
                         self.db_connector.mark_as_processed(item["invoice_id"])
                         self.retry_queue.remove(item["invoice_id"])
                         logger.info(f"Factura {item.get('ecf_number', item['invoice_id'])} (ID: {item['invoice_id']}) reenviada exitosamente y actualizada en ERP")
-                        
+
+                    except APIError as e:
+                        response_data = getattr(e, "response", {}) or {}
+                        errors_list = (
+                            response_data.get("errors", []) if isinstance(response_data, dict) else []
+                        )
+                        ecf_number = item.get("ecf_number") or item["invoice_id"]
+                        validation_ecfs = self._handle_validation_errors(
+                            errors_list,
+                            {ecf_number: item["invoice_id"]},
+                            remove_from_retry=True,
+                        )
+                        if ecf_number in validation_ecfs:
+                            logger.warning(
+                                f"Factura {ecf_number} marcada como no reintentable por validacion"
+                            )
+                            continue
+
+                        # Actualizar contador de intentos
+                        self.retry_queue.update_attempt(item["invoice_id"], str(e))
+                        new_attempts = item["attempts"] + 1
+                        logger.warning(
+                            f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
+                            f"(intento {new_attempts}): {e}"
+                        )
+                        if new_attempts >= self.max_retries:
+                            logger.error(f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
+                            self.db_connector.mark_as_failed(
+                                item.get("ecf_number") or item["invoice_id"],
+                                str(e),
+                                item["invoice_id"]
+                            )
+                            self.retry_queue.remove(item["invoice_id"])
+
                     except Exception as e:
                         # Actualizar contador de intentos
                         self.retry_queue.update_attempt(item["invoice_id"], str(e))
@@ -417,7 +593,11 @@ class ECFAgent:
                         )
                         if new_attempts >= self.max_retries:
                             logger.error(f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
-                            self.db_connector.mark_as_failed(item["invoice_id"], str(e))
+                            self.db_connector.mark_as_failed(
+                                item.get("ecf_number") or item["invoice_id"],
+                                str(e),
+                                item["invoice_id"]
+                            )
                             self.retry_queue.remove(item["invoice_id"])
         except Exception as e:
             logger.error(f"Error general en hilo de reintentos: {e}")

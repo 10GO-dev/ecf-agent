@@ -89,13 +89,11 @@ database:
   # Mapeo numérico para el estado devuelto por la DGII
   # Se inyectará en la variable {status}
   status_mapping:
-    pending: 0
-    not_sent: 0
+    not_found: 0
     accepted: 1
-    conditional_accepted: 2
-    rejected: 3
-    error: 4
-    failed: 4
+    rejected: 2
+    pending: 3
+    conditional_accepted: 4
 
   # Query para marcar que la factura ya fue leída/enviada al backend (estado interno ERP)
   # Paramámetros disponibles: {id}
@@ -105,12 +103,12 @@ database:
     WHERE transaccionid = {id}
 
   # Query para marcar como error interno definitivo (Opcional)
-  # Variables disponibles: {id}, {error}
+  # Variables disponibles: {ecf}, {id}, {error}
   update_error_query: |
     UPDATE interfazencf
     SET estado = '2',
         procesadadgii = '{error}'
-    WHERE transaccionid = {id}
+    WHERE encf = '{ecf}'
 
   # Query para actualizar el estado devuelto por la DGII (procesadadgii)
   # Parámetros disponibles: {ecf}, {status}, {track_id}
