@@ -54,6 +54,7 @@ python3 -m venv "$INSTALL_DIR/venv"
 # 6. Asignar permisos
 echo "Asignando permisos..."
 chown -R $USER_NAME:$USER_NAME "$INSTALL_DIR"
+chmod -R 755 "$INSTALL_DIR"
 
 # 7. Crear archivo de servicio Systemd
 echo "Creando servicio systemd..."

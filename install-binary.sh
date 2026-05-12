@@ -53,6 +53,7 @@ fi
 
 # Asignar permisos
 chown -R $USER_NAME:$USER_NAME "$INSTALL_DIR"
+chmod -R 755 "$INSTALL_DIR"
 
 # 5. Crear archivo de servicio Systemd
 echo "Creando servicio systemd..."

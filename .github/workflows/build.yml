@@ -48,6 +48,9 @@ jobs:
         cp install-binary.sh ecf-agent-linux/
         cp install-source.sh ecf-agent-linux/
         cp config/config.example.yaml ecf-agent-linux/
+        # Asegurar permisos de ejecución antes de empaquetar
+        chmod +x ecf-agent-linux/ecf-agent
+        chmod +x ecf-agent-linux/*.sh
         tar -czf ecf-agent-linux.tar.gz ecf-agent-linux/
 
     - name: Upload Artifacts
