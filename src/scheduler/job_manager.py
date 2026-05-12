@@ -103,6 +103,26 @@ class JobManager:
         self._jobs[name] = job.id
         logger.info(f"Job '{name}' agregado: cada {interval_hours}h")
 
+    def add_job(
+        self,
+        func: Callable,
+        interval_seconds: int = 60,
+        name: Optional[str] = None,
+    ):
+        """
+        Agrega un trabajo genérico por intervalo de segundos.
+        """
+        job_name = name or func.__name__
+        job = self.scheduler.add_job(
+            func,
+            trigger=IntervalTrigger(seconds=interval_seconds),
+            id=job_name,
+            name=job_name,
+            replace_existing=True,
+        )
+        self._jobs[job_name] = job.id
+        logger.info(f"Job '{job_name}' agregado: cada {interval_seconds}s")
+
     def start(self):
         """Inicia el scheduler."""
         if not self.scheduler.running:

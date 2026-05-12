@@ -49,6 +49,7 @@ jobs:
         cp install-source.sh ecf-agent-linux/
         cp -r src ecf-agent-linux/
         cp requirements.txt ecf-agent-linux/
+        cp .env.example ecf-agent-linux/
         cp config/config.example.yaml ecf-agent-linux/
         # Asegurar permisos de ejecución antes de empaquetar
         chmod +x ecf-agent-linux/ecf-agent
