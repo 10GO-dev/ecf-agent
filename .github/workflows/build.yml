@@ -29,29 +29,34 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build Executable (Windows)
+    - name: Package (Windows)
       if: matrix.os == 'windows-latest'
       run: |
         python build.py
-        # Rename for clarity
-        mv dist/ecf-agent.exe dist/ecf-agent-windows.exe
+        mkdir ecf-agent-windows
+        cp dist/ecf-agent.exe ecf-agent-windows/
+        cp install.ps1 ecf-agent-windows/
+        cp config/config.example.yaml ecf-agent-windows/
+        compress-archive -Path ecf-agent-windows/* -DestinationPath ecf-agent-windows.zip
 
-    - name: Build Executable (Linux)
+    - name: Package (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        # Ensure build.py uses python3 or run pyinstaller directly
         python build.py
-        # Rename for clarity
-        mv dist/ecf-agent dist/ecf-agent-linux
+        mkdir ecf-agent-linux
+        cp dist/ecf-agent ecf-agent-linux/
+        cp install-binary.sh ecf-agent-linux/
+        cp install-source.sh ecf-agent-linux/
+        cp config/config.example.yaml ecf-agent-linux/
+        tar -czf ecf-agent-linux.tar.gz ecf-agent-linux/
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ecf-agent-${{ matrix.os }}
         path: |
-          dist/ecf-agent*
-          install*.sh
-          install.ps1
+          *.zip
+          *.tar.gz
 
   release:
     needs: build
@@ -59,18 +64,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     
     steps:
-    - name: Download Windows Artifact
+    - name: Download Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: ecf-agent-windows-latest
-        path: ./artifacts/windows
-        merge-multiple: true
-
-    - name: Download Linux Artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: ecf-agent-ubuntu-latest
-        path: ./artifacts/linux
+        path: ./artifacts
         merge-multiple: true
 
     - name: Create Release
@@ -80,9 +77,6 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          ./artifacts/windows/ecf-agent-windows.exe
-          ./artifacts/windows/install.ps1
-          ./artifacts/linux/ecf-agent-linux
-          ./artifacts/linux/install-binary.sh
-          ./artifacts/linux/install-source.sh
+          ./artifacts/ecf-agent-windows.zip
+          ./artifacts/ecf-agent-linux.tar.gz
         generate_release_notes: true
