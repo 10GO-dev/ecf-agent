@@ -46,8 +46,29 @@ else
 fi
 
 # 5. Configurar entorno virtual
-echo "Configurando entorno virtual en $INSTALL_DIR/venv..."
-python3 -m venv "$INSTALL_DIR/venv"
+echo "Buscando la mejor versión de Python 3 disponible..."
+PYTHON_CMD=""
+for cmd in python3.12 python3.11 python3.10 python3.9 python3.8 python3; do
+    if command -v $cmd &>/dev/null; then
+        VERSION=$($cmd -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+        # Comparar versión (ej. 3.8 >= 3.8)
+        if [ "$(echo $VERSION | cut -d. -f1)" -eq 3 ] && [ "$(echo $VERSION | cut -d. -f2)" -ge 8 ]; then
+            PYTHON_CMD=$cmd
+            echo "Encontrado: $PYTHON_CMD (Versión $VERSION)"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: No se encontró una versión compatible de Python (se requiere 3.8 o superior)."
+    echo "Su versión actual de python3 es $($PYTHON_CMD --version 2>&1 || echo 'desconocida')."
+    echo "Por favor, instale python3.8 o superior: sudo apt-get install python3.8"
+    exit 1
+fi
+
+echo "Configurando entorno virtual usando $PYTHON_CMD en $INSTALL_DIR/venv..."
+$PYTHON_CMD -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
