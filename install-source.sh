@@ -69,8 +69,8 @@ fi
 
 echo "Configurando entorno virtual usando $PYTHON_CMD en $INSTALL_DIR/venv..."
 $PYTHON_CMD -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+"$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip
+"$INSTALL_DIR/venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
 
 # 6. Asignar permisos
 echo "Asignando permisos..."
@@ -88,8 +88,8 @@ After=network.target
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$INSTALL_DIR
-# Ejecutar usando el python del entorno virtual
-ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/src/main.py
+# Ejecutar usando el python del entorno virtual como módulo
+ExecStart=$INSTALL_DIR/venv/bin/python -m src.main run
 Restart=always
 RestartSec=10
 
