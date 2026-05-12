@@ -32,7 +32,8 @@ def build():
     
     if result.returncode == 0:
         print("\n[OK] Compilacion exitosa!")
-        print(f"Ejecutable generado en: {Path('dist/ecf-agent.exe').absolute()}")
+        ext = ".exe" if sys.platform == "win32" else ""
+        print(f"Ejecutable generado en: {Path(f'dist/ecf-agent{ext}').absolute()}")
     else:
         print("\n[ERROR] Error durante la compilacion.")
         sys.exit(result.returncode)

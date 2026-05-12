@@ -48,7 +48,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ecf-agent-${{ matrix.os }}
-        path: dist/ecf-agent*
+        path: |
+          dist/ecf-agent*
+          install*.sh
+          install.ps1
 
   release:
     needs: build
@@ -78,5 +81,8 @@ jobs:
         prerelease: false
         files: |
           ./artifacts/windows/ecf-agent-windows.exe
+          ./artifacts/windows/install.ps1
           ./artifacts/linux/ecf-agent-linux
+          ./artifacts/linux/install-binary.sh
+          ./artifacts/linux/install-source.sh
         generate_release_notes: true

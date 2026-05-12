@@ -32,13 +32,23 @@ if [ -f "ecf-agent" ]; then
     cp ecf-agent "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/ecf-agent"
     echo "Binario copiado."
+elif [ -f "dist/ecf-agent" ]; then
+    cp dist/ecf-agent "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/ecf-agent"
+    echo "Binario copiado desde dist/."
 else
-    echo "ADVERTENCIA: No se encontró el binario 'ecf-agent' en el directorio actual."
+    echo "ERROR: No se encontró el binario 'ecf-agent'. Por favor, ejecute la compilación primero."
+    exit 1
 fi
 
 if [ -f "config.yaml" ]; then
     cp config.yaml "$INSTALL_DIR/"
     echo "Configuración copiada."
+elif [ -f "config/config.yaml" ]; then
+    cp config/config.yaml "$INSTALL_DIR/"
+    echo "Configuración copiada desde config/."
+else
+    echo "ADVERTENCIA: No se encontró 'config.yaml'. Asegúrese de crear uno en $INSTALL_DIR/config.yaml"
 fi
 
 # Asignar permisos
