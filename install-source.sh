@@ -6,9 +6,18 @@
 # Instala el Agente ECF usando el código fuente y un entorno virtual.
 # Requiere ejecutar con sudo.
 
-INSTALL_DIR="/opt/ecf-agent"
-SERVICE_NAME="ecf-agent"
-USER_NAME="ecf-agent"
+INSTANCE_NAME=${1:-""}
+if [ -z "$INSTANCE_NAME" ]; then
+    INSTALL_DIR="/opt/ecf-agent"
+    SERVICE_NAME="ecf-agent"
+    USER_NAME="ecf-agent"
+    echo "Instalando instancia por defecto..."
+else
+    INSTALL_DIR="/opt/ecf-agent-$INSTANCE_NAME"
+    SERVICE_NAME="ecf-agent-$INSTANCE_NAME"
+    USER_NAME="ecf-agent-$INSTANCE_NAME"
+    echo "Instalando instancia: $INSTANCE_NAME..."
+fi
 
 # 1. Verificar root
 if [ "$EUID" -ne 0 ]; then 
@@ -106,8 +115,12 @@ systemctl start $SERVICE_NAME
 echo ""
 echo "==================================================="
 echo "INSTALACIÓN COMPLETADA EXITOSAMENTE (FUENTE)"
+echo "Instancia: ${INSTANCE_NAME:-por defecto}"
+echo "Servicio: $SERVICE_NAME"
+echo "Directorio: $INSTALL_DIR"
 echo "==================================================="
-echo "1. El agente está corriendo desde: $INSTALL_DIR/src/main.py"
-echo "2. Entorno virtual en: $INSTALL_DIR/venv"
-echo "3. Ver logs: journalctl -u $SERVICE_NAME -f"
+echo "Pasos siguientes:"
+echo "1. Configure el archivo $INSTALL_DIR/.env"
+echo "2. Verifique el estado: sudo systemctl status $SERVICE_NAME"
+echo "3. Verifique los logs: journalctl -u $SERVICE_NAME -f"
 echo "==================================================="
