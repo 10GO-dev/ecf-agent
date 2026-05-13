@@ -38,6 +38,56 @@ def sanitize_for_serialization(obj: Any) -> Any:
     return obj
 
 
+NULLISH_STRINGS = {"", "nl", "nll", "null", "none"}
+
+
+def _is_zero_like(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, Decimal):
+        return value == 0
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"0", "0.0", "0.00"}
+    return False
+
+
+def _should_nullify(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in NULLISH_STRINGS or _is_zero_like(value)
+    return _is_zero_like(value)
+
+
+def normalize_invoice_data_for_xml(
+    obj: Any,
+    fields_not_convertible: set[str],
+) -> Any:
+    """Convierte valores nullish a None, salvo en campos marcados como no convertibles."""
+    if isinstance(obj, dict):
+        result: Dict[str, Any] = {}
+        for key, value in obj.items():
+            if isinstance(value, (dict, list)):
+                result[key] = normalize_invoice_data_for_xml(value, fields_not_convertible)
+                continue
+
+            if key in fields_not_convertible:
+                result[key] = value
+            elif _should_nullify(value):
+                result[key] = None
+            else:
+                result[key] = value
+        return result
+
+    if isinstance(obj, list):
+        return [normalize_invoice_data_for_xml(item, fields_not_convertible) for item in obj]
+
+    return obj
+
+
 class ECFAgent:
     """
     Agente de recolección de comprobantes fiscales.
@@ -105,6 +155,11 @@ class ECFAgent:
         self.type_field = config.get("database.type_field", "ecf_type")
         self.rnc_buyer_field = config.get("database.rnc_buyer_field", "rnc_buyer")
         self.total_field = config.get("database.total_field", "total_amount")
+        self.xml_non_convertible_fields = {
+            str(field).strip()
+            for field in config.get("database.xml_non_convertible_fields", [])
+            if str(field).strip()
+        }
 
     def setup_logging(self):
         """Configura el sistema de logging."""
@@ -306,6 +361,11 @@ class ECFAgent:
                             
                         if self.config.get("database.payments_query"):
                             invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
+
+                        invoice_data = normalize_invoice_data_for_xml(
+                            invoice_data,
+                            self.xml_non_convertible_fields,
+                        )
                         
                         # Sanitizar datos (Decimal -> float, datetime -> str) para serialización JSON/MsgPack
                         invoice_data = sanitize_for_serialization(invoice_data)

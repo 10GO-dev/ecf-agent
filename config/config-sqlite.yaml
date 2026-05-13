@@ -85,6 +85,10 @@ database:
   type_field: "ecf_type"
   rnc_buyer_field: "rnc_buyer"
   total_field: "total_amount"
+
+  # Campos que NO se pueden convertir a NULL antes de enviar al backend.
+  # Por ahora se deja vacío porque no hay campos protegidos definidos.
+  xml_non_convertible_fields: []
   
   # Mapeo numérico para el estado devuelto por la DGII
   # Se inyectará en la variable {status}
