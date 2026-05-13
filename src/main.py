@@ -7,7 +7,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 import json
 import datetime
 from decimal import Decimal
@@ -64,7 +64,7 @@ def _should_nullify(value: Any) -> bool:
 
 def normalize_invoice_data_for_xml(
     obj: Any,
-    fields_not_convertible: set[str],
+    fields_not_convertible: Set[str],
 ) -> Any:
     """Convierte valores nullish a None, salvo en campos marcados como no convertibles."""
     if isinstance(obj, dict):
