@@ -104,6 +104,11 @@ database:
   
   # Campo monto total
   total_field: "total_amount"
+
+# Normalización previa al envío al backend.
+# Lista de campos que NO se deben convertir a NULL aunque su valor sea 0/0.00/None-like.
+normalize:
+  xml_non_convertible_fields: []
   
   # Query para marcar como procesada
   # Variables disponibles: {id}

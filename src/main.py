@@ -50,7 +50,7 @@ def _is_zero_like(value: Any) -> bool:
         return value == 0
     if isinstance(value, str):
         normalized = value.strip().lower()
-        return normalized in {"0", "0.0", "0.00"}
+        return normalized in {"0.0", "0.00"}
     return False
 
 
@@ -155,9 +155,17 @@ class ECFAgent:
         self.type_field = config.get("database.type_field", "ecf_type")
         self.rnc_buyer_field = config.get("database.rnc_buyer_field", "rnc_buyer")
         self.total_field = config.get("database.total_field", "total_amount")
+        non_convertible_fields = config.get("normalize.xml_non_convertible_fields", [])
+
+        if isinstance(non_convertible_fields, str):
+            non_convertible_fields = [non_convertible_fields]
+
+        if not isinstance(non_convertible_fields, list):
+            non_convertible_fields = []
+
         self.xml_non_convertible_fields = {
             str(field).strip()
-            for field in config.get("database.xml_non_convertible_fields", [])
+            for field in non_convertible_fields
             if str(field).strip()
         }
 

@@ -86,8 +86,9 @@ database:
   rnc_buyer_field: "rnc_buyer"
   total_field: "total_amount"
 
-  # Campos que NO se pueden convertir a NULL antes de enviar al backend.
-  # Por ahora se deja vacío porque no hay campos protegidos definidos.
+# Normalización previa al envío al backend.
+# Lista de campos que NO se deben convertir a NULL aunque su valor sea 0/0.00/None-like.
+normalize:
   xml_non_convertible_fields: []
   
   # Mapeo numérico para el estado devuelto por la DGII
@@ -123,7 +124,8 @@ database:
 
 # Cola de reintentos
 queue:
-  db_path: "./data/retry_queue.db"
+  # Cola separada para no reutilizar intentos de otros entornos/runs de prueba.
+  db_path: "./data/test_retry_queue.db"
 
 # Configuración de logs
 logging:
