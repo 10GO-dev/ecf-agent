@@ -6,6 +6,7 @@ Utiliza APScheduler para ejecutar tareas periódicas.
 from typing import Callable, Dict, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
@@ -23,6 +24,7 @@ class JobManager:
     def __init__(self):
         """Inicializa el gestor de trabajos."""
         self.scheduler = BackgroundScheduler(
+            executors={"default": ThreadPoolExecutor(max_workers=1)},
             job_defaults={
                 "coalesce": True,  # Combinar ejecuciones perdidas
                 "max_instances": 1,  # Solo una instancia por job
