@@ -10,52 +10,52 @@
 
 agent:
   # RNC del cliente (emisor de los comprobantes)
+
+  # Mapeo numérico para el estado devuelto por la DGII
+  # Se inyectará en la variable {status}
+  status_mapping:
+    not_found: 0
+    accepted: 1
+    rejected: 2
+    pending: 3
+    conditional_accepted: 4
+
+  # Query para marcar que la factura ya fue leída/enviada al backend (estado interno ERP)
+  # Variables disponibles: {id}
+  update_query: |
+    UPDATE interfazencf 
+    SET estado = '1'
+    WHERE transaccionid = {id}
+
+  # Query para marcar como error interno definitivo (Opcional)
+  # Variables disponibles: {ecf}, {id}, {error}
+  update_error_query: |
+    UPDATE interfazencf
+    SET estado = '2',
+        mensaje_error = '{error}'
+    WHERE encf = '{ecf}'
+
+  # ============================================================
+  # QUERIES PARA SINCRONIZACIÓN DE ESTADOS (Fallback)
+  # ============================================================
+  # Query para obtener facturas que se enviaron pero están pendientes de estado DGII
+  pending_status_query: |
+    SELECT encf as ecf_number
+    FROM interfazencf 
+    WHERE estado = '1' AND (procesadadgii = '0' OR procesadadgii = '' OR procesadadgii IS NULL)
+    LIMIT {batch_size}
+
+  # Query para actualizar el estado devuelto por la DGII
+  # Parámetros disponibles: {ecf}, {status}, {track_id}, {error}
+  update_status_query: |
+    UPDATE interfazencf 
+    SET procesadadgii = '{status}'
+    WHERE encf = '{ecf}'
   customer_rnc: "130013454"
   
   # Intervalo de polling a la base de datos (segundos)
   polling_interval_seconds: 10
   
-  # Máximo de facturas por request al API
-  batch_size: 10
-  
-  # Intervalo de reintento para facturas fallidas (segundos)
-  retry_interval_seconds: 60
-  
-  # Máximo de reintentos antes de marcar como fallida
-  max_retries: 3
-
-# Conexión a la API de TekServices (local)
-api:
-  base_url: "${ECF_API_URL:http://localhost:3030}"
-  endpoint: "/private/ecf/invoices"
-  
-  # Autenticación por API Key (desde .env)
-  api_key: "${ECF_API_KEY}"
-  
-  # Entorno del sistema (DEV, CERT, PROD)
-  environment: "${ECF_ENVIRONMENT:DEV}"
-  
-  # Timeout para requests HTTP (segundos)
-  timeout_seconds: 30
-  
-  # Método de compresión: "zstd" | "gzip" | "none"
-  # zstd = MessagePack + zstd + base64 (optimizado, rápido) [DEFAULT]
-  # gzip = JSON + gzip + base64 (compatible, estándar)
-  # Para usar zstd: pip install msgpack zstandard
-  compression: "zstd"
-
-# Conexión a SQLite de prueba
-database:
-  driver: "sqlite"
-  database: "./data/test_invoices.db"
-  
-  # Standard query for headers
-  query: |
-    SELECT *,
-           transaccionid as id,
-           encf as ecf_number,
-           tipoecf as ecf_type,
-           RNCComprador as rnc_buyer,
            MontoTotal as total_amount
     FROM interfazencf
     WHERE estado = '0'
@@ -85,11 +85,6 @@ database:
   type_field: "ecf_type"
   rnc_buyer_field: "rnc_buyer"
   total_field: "total_amount"
-
-# Normalización previa al envío al backend.
-# Lista de campos que NO se deben convertir a NULL aunque su valor sea 0/0.00/None-like.
-normalize:
-  xml_non_convertible_fields: []
   
   # Mapeo numérico para el estado devuelto por la DGII
   # Se inyectará en la variable {status}
@@ -124,8 +119,7 @@ normalize:
 
 # Cola de reintentos
 queue:
-  # Cola separada para no reutilizar intentos de otros entornos/runs de prueba.
-  db_path: "./data/test_retry_queue.db"
+  db_path: "./data/retry_queue.db"
 
 # Configuración de logs
 logging:
