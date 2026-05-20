@@ -4,6 +4,7 @@ Versión simplificada: solo extrae datos de BD y los envía comprimidos.
 """
 
 import signal
+import threading
 import sys
 import time
 from pathlib import Path
@@ -116,6 +117,7 @@ class ECFAgent:
         )
         self.job_manager = JobManager()
         self.updater = AutoUpdater(config.agent)
+        self.db_lock = threading.RLock()
         
         # Configuración del agente
         self.customer_rnc = config.get("agent.customer_rnc")
@@ -267,166 +269,299 @@ class ECFAgent:
         Trabajo principal: obtiene facturas de la BD y las envía al servidor.
         """
         logger.info("Iniciando polling de facturas...")
+        try:
+            with self.db_lock:
+                with self.db_connector:
+                    invoices = self.db_connector.get_pending_invoices(self.batch_size)
+
+                    if not invoices:
+                        logger.debug("No hay facturas pendientes")
+                        return
+
+                    filtered_invoices = []
+                    for row in invoices:
+                        invoice_id = str(row.get(self.id_field))
+                        if self.retry_queue.exists(invoice_id):
+                            continue
+                        filtered_invoices.append(row)
+
+                    invoices = filtered_invoices
+                    if not invoices:
+                        logger.debug("Todas las facturas pendientes están bajo gestión de reintentos")
+                        return
+
+                    logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
+
+                    invoices_to_send = []
+                    invoice_ids = []
+
+                    for row in invoices:
+                        invoice_ids.append(row.get(self.id_field))
+
+                    ecf_to_id = {}
+                    for row in invoices:
+                        ecf_value = str(row.get(self.ecf_field, ""))
+                        if ecf_value:
+                            ecf_to_id[ecf_value] = str(row.get(self.id_field))
+
+                    grouped_details = {str(id_): [] for id_ in invoice_ids}
+                    grouped_taxes = {str(id_): [] for id_ in invoice_ids}
+                    grouped_payments = {str(id_): [] for id_ in invoice_ids}
+                    grouped_reference_info = {str(id_): None for id_ in invoice_ids}
+
+                    ids_str = ",".join(str(id_) for id_ in invoice_ids)
+
+                    details_query = self.config.get("database.details_query")
+                    if details_query:
+                        query = details_query.format(ids=ids_str)
+                        logger.debug(f"Ejecutando subquery details: {query}")
+                        try:
+                            details_res = self.db_connector.execute_query(query)
+                            for d in details_res:
+                                tid = str(d.get("transaccionid"))
+                                if tid in grouped_details:
+                                    grouped_details[tid].append(d)
+                        except Exception as e:
+                            logger.error(f"Error en subquery details: {e}")
+
+                    taxes_query = self.config.get("database.taxes_query")
+                    if taxes_query:
+                        query = taxes_query.format(ids=ids_str)
+                        logger.debug(f"Ejecutando subquery taxes: {query}")
+                        try:
+                            taxes_res = self.db_connector.execute_query(query)
+                            for t in taxes_res:
+                                tid = str(t.get("transaccionid"))
+                                if tid in grouped_taxes:
+                                    grouped_taxes[tid].append(t)
+                        except Exception as e:
+                            logger.error(f"Error en subquery taxes: {e}")
+
+                    payments_query = self.config.get("database.payments_query")
+                    if payments_query:
+                        query = payments_query.format(ids=ids_str)
+                        logger.debug(f"Ejecutando subquery payments: {query}")
+                        try:
+                            pay_res = self.db_connector.execute_query(query)
+                            for p in pay_res:
+                                tid = str(p.get("transaccionid"))
+                                if tid in grouped_payments:
+                                    grouped_payments[tid].append(p)
+                        except Exception as e:
+                            logger.error(f"Error en subquery payments: {e}")
+
+                    reference_info_query = self.config.get("database.reference_info_query")
+                    if reference_info_query:
+                        query = reference_info_query.format(ids=ids_str)
+                        logger.debug(f"Ejecutando subquery reference_info: {query}")
+                        try:
+                            reference_res = self.db_connector.execute_query(query)
+                            for ref in reference_res:
+                                tid = str(ref.get("transaccionid"))
+                                if tid in grouped_reference_info and grouped_reference_info[tid] is None:
+                                    grouped_reference_info[tid] = ref
+                        except Exception as e:
+                            logger.error(f"Error en subquery reference_info: {e}")
+
+                    for row in invoices:
+                        try:
+                            row_id = str(row.get(self.id_field))
+
+                            invoice_data = dict(row)
+
+                            if self.config.get("database.details_query"):
+                                invoice_data["Detalles"] = grouped_details.get(row_id, [])
+
+                            if self.config.get("database.taxes_query"):
+                                invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])
+
+                            if self.config.get("database.payments_query"):
+                                invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
+
+                            if self.config.get("database.reference_info_query"):
+                                reference_info = grouped_reference_info.get(row_id)
+                                if reference_info:
+                                    invoice_data["InformacionReferencia"] = reference_info
+
+                            invoice_data = normalize_invoice_data_for_xml(
+                                invoice_data,
+                                self.xml_non_convertible_fields,
+                            )
+
+                            invoice_data = sanitize_for_serialization(invoice_data)
+
+                            invoice_payload = {
+                                "rnc_buyer": str(row.get(self.rnc_buyer_field, "")),
+                                "ecf": str(row.get(self.ecf_field, "")),
+                                "ecf_type": str(row.get(self.type_field, "")),
+                                "total_amount": str(row.get(self.total_field, "0.00")),
+                                "invoice_data": invoice_data,
+                            }
+
+                            logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
+                            invoices_to_send.append(invoice_payload)
+
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parseando JSON de factura: {e}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error procesando factura: {e}")
+                            continue
+
+                    if not invoices_to_send:
+                        logger.warning("No se pudieron procesar facturas")
+                        return
+
+                    try:
+                        response = self.api_client.send_batch(
+                            self.customer_rnc,
+                            invoices_to_send,
+                            compress=True,
+                            compression_method=self.compression_method,
+                        )
+
+                        for invoice_id in invoice_ids:
+                            self.db_connector.mark_as_processed(invoice_id)
+
+                        logger.info(f"Batch enviado exitosamente: {len(invoices_to_send)} facturas")
+
+                        results = response.get("results", [])
+                        ecf_to_id = {
+                            invoice.get("ecf"): str(invoice_ids[i])
+                            for i, invoice in enumerate(invoices_to_send)
+                            if invoice.get("ecf")
+                        }
+                        if results:
+                            logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
+                            for res in results:
+                                ecf = res.get("ecf")
+                                status = res.get("dgii_status") or res.get("status")
+                                track_id = res.get("dgii_track_id", "")
+                                error_msg = res.get("dgii_error", "")
+
+                                if ecf and status:
+                                    mapping = self.config.get("database.status_mapping", {})
+                                    status_key = str(status).lower()
+                                    if status_key not in mapping:
+                                        if status_key == "error" and error_msg:
+                                            invoice_id = ecf_to_id.get(ecf)
+                                            self.db_connector.mark_as_failed(ecf, error_msg, invoice_id)
+                                        else:
+                                            logger.info(
+                                                f"Estado no-DGII '{status}' para {ecf}; se omite actualizar procesadadgii"
+                                            )
+                                        continue
+                                    local_status = str(mapping.get(status_key))
+                                    if error_msg:
+                                        logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
+                                    self.db_connector.update_invoice_status(ecf, local_status, track_id)
+
+                    except APIError as e:
+                        logger.error(f"Error de API enviando batch: {e}")
+
+                        response_data = getattr(e, "response", {}) or {}
+                        errors_list = (
+                            response_data.get("errors", []) if isinstance(response_data, dict) else []
+                        )
+                        validation_ecfs = self._handle_validation_errors(errors_list, ecf_to_id)
+
+                        failed_ecfs = {err.get("ecf") for err in errors_list if isinstance(err, dict) and "ecf" in err}
+                        results_list = (
+                            response_data.get("results", []) or response_data.get("invoices", [])
+                        ) if isinstance(response_data, dict) else []
+                        success_ecfs = {
+                            res.get("ecf")
+                            for res in results_list
+                            if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")
+                        }
+
+                        if validation_ecfs:
+                            failed_ecfs = {ecf for ecf in failed_ecfs if ecf not in validation_ecfs}
+
+                        if not failed_ecfs and not success_ecfs:
+                            for i, invoice in enumerate(invoices_to_send):
+                                self.retry_queue.add(
+                                    invoice_id=str(invoice_ids[i]),
+                                    customer_rnc=self.customer_rnc,
+                                    payload=invoice,
+                                    ecf_type=invoice.get("ecf_type"),
+                                    ecf_number=invoice.get("ecf"),
+                                    error_message=str(e),
+                                )
+                            logger.info(f"{len(invoices_to_send)} facturas agregadas a cola de reintentos por fallo general")
+                        else:
+                            added_to_retry = 0
+                            for i, invoice in enumerate(invoices_to_send):
+                                ecf_num = invoice.get("ecf")
+                                invoice_id = str(invoice_ids[i])
+
+                                if ecf_num in validation_ecfs:
+                                    continue
+
+                                if ecf_num in failed_ecfs or (ecf_num not in success_ecfs):
+                                    self.retry_queue.add(
+                                        invoice_id=invoice_id,
+                                        customer_rnc=self.customer_rnc,
+                                        payload=invoice,
+                                        ecf_type=invoice.get("ecf_type"),
+                                        ecf_number=ecf_num,
+                                        error_message="Fallo parcial en batch",
+                                    )
+                                    added_to_retry += 1
+                                else:
+                                    self.db_connector.mark_as_processed(invoice_id)
+                            logger.info(f"{added_to_retry} facturas enviadas a cola de reintentos por fallo parcial")
+
+                    except Exception as e:
+                        logger.error(f"Error genérico enviando batch o actualizando estados: {e}")
+
+                        for i, invoice in enumerate(invoices_to_send):
+                            self.retry_queue.add(
+                                invoice_id=str(invoice_ids[i]),
+                                customer_rnc=self.customer_rnc,
+                                payload=invoice,
+                                ecf_type=invoice.get("ecf_type"),
+                                ecf_number=invoice.get("ecf"),
+                                error_message=str(e),
+                            )
+                        logger.info(f"{len(invoices_to_send)} facturas agregadas a cola de reintentos")
+
+        except Exception as e:
+            logger.error(f"Error en polling: {e}")
+
+    def sync_statuses(self):
+        """
+        Trabajo de recuperación (Fallback Sync): 
+        Consulta al backend por el estado de las facturas que quedaron 'Pendientes'.
+        """
+        logger.debug("Verificando facturas pendientes de estado (Fallback Polling)...")
         
         try:
-            with self.db_connector:
-                # Obtener facturas pendientes
-                invoices = self.db_connector.get_pending_invoices(self.batch_size)
-                
-                if not invoices:
-                    logger.debug("No hay facturas pendientes")
-                    return
-                
-                # Filtrar facturas que ya están en la cola de reintentos (evitar doble envío)
-                filtered_invoices = []
-                for row in invoices:
-                    invoice_id = str(row.get(self.id_field))
-                    if self.retry_queue.exists(invoice_id):
-                        continue
-                    filtered_invoices.append(row)
-                
-                invoices = filtered_invoices
-                if not invoices:
-                    logger.debug("Todas las facturas pendientes están bajo gestión de reintentos")
-                    return
-                
-                logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
-                
-                # Preparar datos para envío
-                invoices_to_send = []
-                invoice_ids = []
-                
-                # Para evitar N+1 queries, primero recopilamos todos los IDs
-                for row in invoices:
-                    invoice_ids.append(row.get(self.id_field))
-
-                # Mapeo ECF -> ID para actualizaciones puntuales
-                ecf_to_id = {}
-                for row in invoices:
-                    ecf_value = str(row.get(self.ecf_field, ""))
-                    if ecf_value:
-                        ecf_to_id[ecf_value] = str(row.get(self.id_field))
-                
-                # Mapeos para guardar resultados agrupados por transaccionid
-                grouped_details = {str(id_): [] for id_ in invoice_ids}
-                grouped_taxes = {str(id_): [] for id_ in invoice_ids}
-                grouped_payments = {str(id_): [] for id_ in invoice_ids}
-                
-                # Traer subqueries usando cláusula IN
-                ids_str = ",".join(str(id_) for id_ in invoice_ids)
-                
-                details_query = self.config.get("database.details_query")
-                if details_query:
-                    query = details_query.format(ids=ids_str)
-                    logger.debug(f"Ejecutando subquery details: {query}")
-                    try:
-                        details_res = self.db_connector.execute_query(query)
-                        for d in details_res:
-                            tid = str(d.get("transaccionid"))
-                            if tid in grouped_details:
-                                grouped_details[tid].append(d)
-                    except Exception as e:
-                        logger.error(f"Error en subquery details: {e}")
-
-                taxes_query = self.config.get("database.taxes_query")
-                if taxes_query:
-                    query = taxes_query.format(ids=ids_str)
-                    logger.debug(f"Ejecutando subquery taxes: {query}")
-                    try:
-                        taxes_res = self.db_connector.execute_query(query)
-                        for t in taxes_res:
-                            tid = str(t.get("transaccionid"))
-                            if tid in grouped_taxes:
-                                grouped_taxes[tid].append(t)
-                    except Exception as e:
-                        logger.error(f"Error en subquery taxes: {e}")
-
-                payments_query = self.config.get("database.payments_query")
-                if payments_query:
-                    query = payments_query.format(ids=ids_str)
-                    logger.debug(f"Ejecutando subquery payments: {query}")
-                    try:
-                        pay_res = self.db_connector.execute_query(query)
-                        for p in pay_res:
-                            tid = str(p.get("transaccionid"))
-                            if tid in grouped_payments:
-                                grouped_payments[tid].append(p)
-                    except Exception as e:
-                        logger.error(f"Error en subquery payments: {e}")
-
-                for row in invoices:
-                    try:
-                        row_id = str(row.get(self.id_field))
-                        
-                        # Ensamblamos el JSON nativamente
-                        invoice_data = dict(row)
-                        
-                        if self.config.get("database.details_query"):
-                            invoice_data["Detalles"] = grouped_details.get(row_id, [])
-                        
-                        if self.config.get("database.taxes_query"):
-                            invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])
-                            
-                        if self.config.get("database.payments_query"):
-                            invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
-
-                        invoice_data = normalize_invoice_data_for_xml(
-                            invoice_data,
-                            self.xml_non_convertible_fields,
-                        )
-                        
-                        # Sanitizar datos (Decimal -> float, datetime -> str) para serialización JSON/MsgPack
-                        invoice_data = sanitize_for_serialization(invoice_data)
-                        
-                        # Preparar estructura para envío
-                        invoice_payload = {
-                            "rnc_buyer": str(row.get(self.rnc_buyer_field, "")),
-                            "ecf": str(row.get(self.ecf_field, "")),
-                            "ecf_type": str(row.get(self.type_field, "")),
-                            "total_amount": str(row.get(self.total_field, "0.00")),
-                            "invoice_data": invoice_data,  # Se comprimirá en el sender
-                        }
-                        
-                        logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
-                        
-                        invoices_to_send.append(invoice_payload)
-                        
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Error parseando JSON de factura: {e}")
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error procesando factura: {e}")
-                        continue
-                
-                if not invoices_to_send:
-                    logger.warning("No se pudieron procesar facturas")
-                    return
-                
-                # Enviar batch
-                try:
-                    response = self.api_client.send_batch(
-                        self.customer_rnc,
-                        invoices_to_send,
-                        compress=True,
-                        compression_method=self.compression_method,
-                    )
+            with self.db_lock:
+                with self.db_connector:
+                    pending_invoices = self.db_connector.get_pending_status_invoices(self.batch_size)
                     
-                    # Marcar como procesadas
-                    for invoice_id in invoice_ids:
-                        self.db_connector.mark_as_processed(invoice_id)
+                    if not pending_invoices:
+                        return
                     
-                    logger.info(f"Batch enviado exitosamente: {len(invoices_to_send)} facturas")
-                    
-                    # PROCESAMIENTO SÍNCRONO DE ESTADOS (Hot-Sync)
-                    # El backend debe retornar un arreglo "results" con el estado de cada ECF
-                    results = response.get("results", [])
+                    # Extraemos solo los números de ECF
+                    ecf_field_name = self.config.get("database.ecf_field", "encf")
+                    ecfs_to_sync = [row.get(ecf_field_name) for row in pending_invoices if row.get(ecf_field_name)]
                     ecf_to_id = {
-                        invoice.get("ecf"): str(invoice_ids[i])
-                        for i, invoice in enumerate(invoices_to_send)
-                        if invoice.get("ecf")
+                        row.get(ecf_field_name): row.get("id")
+                        for row in pending_invoices
+                        if row.get(ecf_field_name) and row.get("id")
                     }
+                    
+                    if not ecfs_to_sync:
+                        logger.warning("Query de pendientes no retornó el campo ECF correcto.")
+                        return
+                    
+                    response = self.api_client.sync_status(self.customer_rnc, ecfs_to_sync)
+                    
+                    results = response.get("results", [])
                     if results:
-                        logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
+                        logger.info(f"Actualizando {len(results)} facturas desde sincronización asíncrona")
                         for res in results:
                             ecf = res.get("ecf")
                             status = res.get("dgii_status") or res.get("status")
@@ -449,139 +584,6 @@ class ECFAgent:
                                 if error_msg:
                                     logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                 self.db_connector.update_invoice_status(ecf, local_status, track_id)
-                    # Fin de procesamiento de batch exitoso
-                except APIError as e:
-                    logger.error(f"Error de API enviando batch: {e}")
-
-                    response_data = getattr(e, "response", {}) or {}
-                    errors_list = (
-                        response_data.get("errors", []) if isinstance(response_data, dict) else []
-                    )
-                    validation_ecfs = self._handle_validation_errors(errors_list, ecf_to_id)
-
-                    failed_ecfs = {err.get("ecf") for err in errors_list if isinstance(err, dict) and "ecf" in err}
-                    results_list = (
-                        response_data.get("results", []) or response_data.get("invoices", [])
-                    ) if isinstance(response_data, dict) else []
-                    success_ecfs = {
-                        res.get("ecf")
-                        for res in results_list
-                        if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")
-                    }
-
-                    if validation_ecfs:
-                        failed_ecfs = {ecf for ecf in failed_ecfs if ecf not in validation_ecfs}
-                    
-                    if not failed_ecfs and not success_ecfs:
-                        # Fallo completo (ej. Timeout, 500)
-                        for i, invoice in enumerate(invoices_to_send):
-                            self.retry_queue.add(
-                                invoice_id=str(invoice_ids[i]),
-                                customer_rnc=self.customer_rnc,
-                                payload=invoice,
-                                ecf_type=invoice.get("ecf_type"),
-                                ecf_number=invoice.get("ecf"),
-                                error_message=str(e),
-                            )
-                        logger.info(f"{len(invoices_to_send)} facturas agregadas a cola de reintentos por fallo general")
-                    else:
-                        # Fallo parcial
-                        added_to_retry = 0
-                        for i, invoice in enumerate(invoices_to_send):
-                            ecf_num = invoice.get("ecf")
-                            invoice_id = str(invoice_ids[i])
-
-                            if ecf_num in validation_ecfs:
-                                continue
-                            
-                            if ecf_num in failed_ecfs or (ecf_num not in success_ecfs):
-                                # Asumir fallo si explícitamente falló o no vino en results
-                                self.retry_queue.add(
-                                    invoice_id=invoice_id,
-                                    customer_rnc=self.customer_rnc,
-                                    payload=invoice,
-                                    ecf_type=invoice.get("ecf_type"),
-                                    ecf_number=ecf_num,
-                                    error_message="Fallo parcial en batch",
-                                )
-                                added_to_retry += 1
-                            else:
-                                # Tuvo éxito a pesar del error general
-                                self.db_connector.mark_as_processed(invoice_id)
-                        logger.info(f"{added_to_retry} facturas enviadas a cola de reintentos por fallo parcial")
-                
-                except Exception as e:
-                    logger.error(f"Error genérico enviando batch o actualizando estados: {e}")
-                    
-                    # Agregar a cola de reintentos (Fallo general)
-                    for i, invoice in enumerate(invoices_to_send):
-                        self.retry_queue.add(
-                            invoice_id=str(invoice_ids[i]),
-                            customer_rnc=self.customer_rnc,
-                            payload=invoice,
-                            ecf_type=invoice.get("ecf_type"),
-                            ecf_number=invoice.get("ecf"),
-                            error_message=str(e),
-                        )
-                    logger.info(f"{len(invoices_to_send)} facturas agregadas a cola de reintentos")
-                
-        except Exception as e:
-            logger.error(f"Error en polling: {e}")
-
-    def sync_statuses(self):
-        """
-        Trabajo de recuperación (Fallback Sync): 
-        Consulta al backend por el estado de las facturas que quedaron 'Pendientes'.
-        """
-        logger.debug("Verificando facturas pendientes de estado (Fallback Polling)...")
-        
-        try:
-            with self.db_connector:
-                pending_invoices = self.db_connector.get_pending_status_invoices(self.batch_size)
-                
-                if not pending_invoices:
-                    return
-                
-                # Extraemos solo los números de ECF
-                ecf_field_name = self.config.get("database.ecf_field", "encf")
-                ecfs_to_sync = [row.get(ecf_field_name) for row in pending_invoices if row.get(ecf_field_name)]
-                ecf_to_id = {
-                    row.get(ecf_field_name): row.get("id")
-                    for row in pending_invoices
-                    if row.get(ecf_field_name) and row.get("id")
-                }
-                
-                if not ecfs_to_sync:
-                    logger.warning("Query de pendientes no retornó el campo ECF correcto.")
-                    return
-                
-                response = self.api_client.sync_status(self.customer_rnc, ecfs_to_sync)
-                
-                results = response.get("results", [])
-                if results:
-                    logger.info(f"Actualizando {len(results)} facturas desde sincronización asíncrona")
-                    for res in results:
-                        ecf = res.get("ecf")
-                        status = res.get("dgii_status") or res.get("status")
-                        track_id = res.get("dgii_track_id", "")
-                        error_msg = res.get("dgii_error", "")
-                        
-                        if ecf and status:
-                            mapping = self.config.get("database.status_mapping", {})
-                            status_key = str(status).lower()
-                            if status_key not in mapping:
-                                if status_key == "error" and error_msg:
-                                    invoice_id = ecf_to_id.get(ecf)
-                                    self.db_connector.mark_as_failed(ecf, error_msg, invoice_id)
-                                else:
-                                    logger.info(
-                                        f"Estado no-DGII '{status}' para {ecf}; se omite actualizar procesadadgii"
-                                    )
-                                continue
-                            local_status = str(mapping.get(status_key))
-                            if error_msg:
-                                logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
-                            self.db_connector.update_invoice_status(ecf, local_status, track_id)
                             
         except Exception as e:
             logger.error(f"Error en sincronización de estados (Fallback): {e}")
@@ -603,70 +605,75 @@ class ECFAgent:
         logger.info(f"Reintentando {len(pending)} facturas")
         
         try:
-            with self.db_connector:
-                for item in pending:
-                    try:
-                        self.api_client.send_single(
-                            item["customer_rnc"],
-                            item["payload"],
-                            compress=True,
-                            compression_method=self.compression_method,
-                        )
-                        
-                        # Éxito: actualizar BD y eliminar de cola
-                        self.db_connector.mark_as_processed(item["invoice_id"])
-                        self.retry_queue.remove(item["invoice_id"])
-                        logger.info(f"Factura {item.get('ecf_number', item['invoice_id'])} (ID: {item['invoice_id']}) reenviada exitosamente y actualizada en ERP")
+            with self.db_lock:
+                with self.db_connector:
+                    for item in pending:
+                        try:
+                            self.api_client.send_single(
+                                item["customer_rnc"],
+                                item["payload"],
+                                compress=True,
+                                compression_method=self.compression_method,
+                            )
 
-                    except APIError as e:
-                        response_data = getattr(e, "response", {}) or {}
-                        errors_list = (
-                            response_data.get("errors", []) if isinstance(response_data, dict) else []
-                        )
-                        ecf_number = item.get("ecf_number") or item["invoice_id"]
-                        validation_ecfs = self._handle_validation_errors(
-                            errors_list,
-                            {ecf_number: item["invoice_id"]},
-                            remove_from_retry=True,
-                        )
-                        if ecf_number in validation_ecfs:
+                            self.db_connector.mark_as_processed(item["invoice_id"])
+                            self.retry_queue.remove(item["invoice_id"])
+                            logger.info(
+                                f"Factura {item.get('ecf_number', item['invoice_id'])} "
+                                f"(ID: {item['invoice_id']}) reenviada exitosamente y actualizada en ERP"
+                            )
+
+                        except APIError as e:
+                            response_data = getattr(e, "response", {}) or {}
+                            errors_list = (
+                                response_data.get("errors", []) if isinstance(response_data, dict) else []
+                            )
+                            ecf_number = item.get("ecf_number") or item["invoice_id"]
+                            validation_ecfs = self._handle_validation_errors(
+                                errors_list,
+                                {ecf_number: item["invoice_id"]},
+                                remove_from_retry=True,
+                            )
+                            if ecf_number in validation_ecfs:
+                                logger.warning(
+                                    f"Factura {ecf_number} marcada como no reintentable por validacion"
+                                )
+                                continue
+
+                            self.retry_queue.update_attempt(item["invoice_id"], str(e))
+                            new_attempts = item["attempts"] + 1
                             logger.warning(
-                                f"Factura {ecf_number} marcada como no reintentable por validacion"
+                                f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
+                                f"(intento {new_attempts}): {e}"
                             )
-                            continue
+                            if new_attempts >= self.max_retries:
+                                logger.error(
+                                    f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP."
+                                )
+                                self.db_connector.mark_as_failed(
+                                    item.get("ecf_number") or item["invoice_id"],
+                                    str(e),
+                                    item["invoice_id"],
+                                )
+                                self.retry_queue.remove(item["invoice_id"])
 
-                        # Actualizar contador de intentos
-                        self.retry_queue.update_attempt(item["invoice_id"], str(e))
-                        new_attempts = item["attempts"] + 1
-                        logger.warning(
-                            f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
-                            f"(intento {new_attempts}): {e}"
-                        )
-                        if new_attempts >= self.max_retries:
-                            logger.error(f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
-                            self.db_connector.mark_as_failed(
-                                item.get("ecf_number") or item["invoice_id"],
-                                str(e),
-                                item["invoice_id"]
+                        except Exception as e:
+                            self.retry_queue.update_attempt(item["invoice_id"], str(e))
+                            new_attempts = item["attempts"] + 1
+                            logger.warning(
+                                f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
+                                f"(intento {new_attempts}): {e}"
                             )
-                            self.retry_queue.remove(item["invoice_id"])
-
-                    except Exception as e:
-                        # Actualizar contador de intentos
-                        self.retry_queue.update_attempt(item["invoice_id"], str(e))
-                        new_attempts = item["attempts"] + 1
-                        logger.warning(
-                            f"Reintento fallido para {item.get('ecf_number', item['invoice_id'])} "
-                            f"(intento {new_attempts}): {e}"
-                        )
-                        if new_attempts >= self.max_retries:
-                            logger.error(f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP.")
-                            self.db_connector.mark_as_failed(
-                                item.get("ecf_number") or item["invoice_id"],
-                                str(e),
-                                item["invoice_id"]
-                            )
-                            self.retry_queue.remove(item["invoice_id"])
+                            if new_attempts >= self.max_retries:
+                                logger.error(
+                                    f"Factura {item.get('ecf_number', item['invoice_id'])} superó max_retries ({self.max_retries}). Marcando como fallida en ERP."
+                                )
+                                self.db_connector.mark_as_failed(
+                                    item.get("ecf_number") or item["invoice_id"],
+                                    str(e),
+                                    item["invoice_id"],
+                                )
+                                self.retry_queue.remove(item["invoice_id"])
         except Exception as e:
             logger.error(f"Error general en hilo de reintentos: {e}")
 

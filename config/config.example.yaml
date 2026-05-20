@@ -54,7 +54,7 @@ database:
   # ============================================================
   # EXTRACTOR DB-AGNOSTICO
   # ============================================================
-  # Configura las 4 queries necesarias para extraer las facturas.
+  # Configura las 5 queries necesarias para extraer las facturas.
   # El Agente se encargará de ensamblar el JSON internamente.
   #
   # Variables disponibles:
@@ -89,6 +89,18 @@ database:
     SELECT * 
     FROM ecfformapago 
     WHERE transaccionid IN ({ids})
+
+  reference_info_query: |
+    SELECT
+        r.transaccionid,
+        r.codalmacen,
+        r.NCFModificado,
+        r.RNCOtroContribuyente,
+        r.FechaNCFModificado,
+        r.CodigoModificacion,
+        r.Razonmodificacion
+    FROM ecfinformacionref r
+    WHERE r.transaccionid IN ({ids})
   
   # Campo ID único de la factura
   id_field: "id"
