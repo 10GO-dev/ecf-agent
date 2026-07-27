@@ -43,12 +43,6 @@ class AutoUpdater:
         """
         Verifica si hay actualizaciones en GitHub Releases y las aplica.
         """
-        # Ya no salimos si self.enabled es False, porque queremos notificar.
-        
-        if not self.is_frozen:
-            logger.debug("Ejecutando desde código fuente, saltando actualización.")
-            return False
-
         # Si no se configura URL específica, usar la API pública de GitHub
         # Formato esperado: https://api.github.com/repos/USUARIO/REPO/releases/latest
         api_url = self.update_url or "https://api.github.com/repos/TU_USUARIO/ecf-agent/releases/latest"
@@ -80,6 +74,10 @@ class AutoUpdater:
                 f"🚨 ¡NUEVA ACTUALIZACIÓN DISPONIBLE! "
                 f"Versión instalada: {local_version} -> Nueva versión: {remote_version}"
             )
+
+            if not self.is_frozen:
+                logger.info("Ejecutando desde código fuente, no se puede auto-actualizar automáticamente. Actualice manualmente.")
+                return False
 
             if not self.enabled:
                 logger.info("Auto-actualización deshabilitada. Por favor, actualice manualmente.")

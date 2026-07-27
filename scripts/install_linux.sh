@@ -110,7 +110,12 @@ EOF
     # Recargar systemd
     systemctl daemon-reload
     
-    print_status "Servicio instalado" "success"
+    VERSION="desconocida"
+    if [ -f "$INSTALL_DIR/src/__init__.py" ]; then
+        VERSION=$(grep "__version__" "$INSTALL_DIR/src/__init__.py" | cut -d'"' -f2)
+    fi
+
+    print_status "Servicio instalado (Versión: $VERSION)" "success"
     echo ""
     echo "Próximos pasos:"
     echo "  1. Edite la configuración: nano $INSTALL_DIR/config/config.yaml"

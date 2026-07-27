@@ -112,11 +112,17 @@ systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl start $SERVICE_NAME
 
+VERSION="desconocida"
+if [ -f "src/__init__.py" ]; then
+    VERSION=$(grep "__version__" src/__init__.py | cut -d'"' -f2)
+fi
+
 echo ""
 echo "==================================================="
 echo "INSTALACIÓN COMPLETADA EXITOSAMENTE (FUENTE)"
 echo "Instancia: ${INSTANCE_NAME:-por defecto}"
 echo "Servicio: $SERVICE_NAME"
+echo "Versión: $VERSION"
 echo "Directorio: $INSTALL_DIR"
 echo "==================================================="
 echo "Pasos siguientes:"

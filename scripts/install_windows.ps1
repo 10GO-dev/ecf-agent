@@ -65,7 +65,11 @@ function Install-Service {
         & $NssmPath set $ServiceName AppStdout "$ProjectRoot\logs\service.log"
         & $NssmPath set $ServiceName AppStderr "$ProjectRoot\logs\service-error.log"
         
-        Write-Status "Servicio instalado con NSSM" "Success"
+        $Version = "desconocida"
+        if (Test-Path "$ProjectRoot\src\__init__.py") {
+            $Version = (Get-Content "$ProjectRoot\src\__init__.py" | Select-String "__version__") -replace '.*"([^"]+)".*', '$1'
+        }
+        Write-Status "Servicio instalado (Versión: $Version) con NSSM" "Success"
     }
     else {
         # Alternativa: crear tarea programada
@@ -78,7 +82,11 @@ function Install-Service {
         
         Register-ScheduledTask -TaskName $ServiceName -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Description $Description -Force
         
-        Write-Status "Tarea programada creada" "Success"
+        $Version = "desconocida"
+        if (Test-Path "$ProjectRoot\src\__init__.py") {
+            $Version = (Get-Content "$ProjectRoot\src\__init__.py" | Select-String "__version__") -replace '.*"([^"]+)".*', '$1'
+        }
+        Write-Status "Tarea programada creada (Versión: $Version)" "Success"
     }
 }
 

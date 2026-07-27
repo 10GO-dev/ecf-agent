@@ -63,10 +63,21 @@ Write-Host "Configurando servicio $ServiceName..."
 Write-Host "Iniciando servicio..."
 & $NssmPath start $ServiceName
 
+$Version = "desconocida"
+if (Test-Path "$InstallationPath\ecf-agent.exe") {
+    try {
+        $Version = (& "$InstallationPath\ecf-agent.exe" --version)
+    } catch {}
+}
+if ($Version -eq "desconocida" -and (Test-Path "src\__init__.py")) {
+    $Version = (Get-Content "src\__init__.py" | Select-String "__version__") -replace '.*"([^"]+)".*', '$1'
+}
+
 Write-Host "
 ===================================================
 INSTALACIÓN COMPLETADA EXITOSAMENTE
 ===================================================
+Versión: $Version
 1. Edita el archivo de configuración en: $InstallationPath\config.yaml
 2. Reinicia el servicio para aplicar cambios: nssm restart $ServiceName
 " -ForegroundColor Cyan

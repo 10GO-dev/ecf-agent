@@ -79,9 +79,17 @@ systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl start $SERVICE_NAME
 
+VERSION="desconocida"
+if [ -f "src/__init__.py" ]; then
+    VERSION=$(grep "__version__" src/__init__.py | cut -d'"' -f2)
+fi
+
 echo ""
 echo "==================================================="
 echo "INSTALACIÓN COMPLETADA EXITOSAMENTE"
+echo "Servicio: $SERVICE_NAME"
+echo "Versión: $VERSION"
+echo "Directorio: $INSTALL_DIR"
 echo "==================================================="
 echo "1. Edita la configuración en: $INSTALL_DIR/config.yaml"
 echo "2. Reinicia el servicio: sudo systemctl restart $SERVICE_NAME"
