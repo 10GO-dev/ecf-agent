@@ -45,7 +45,7 @@ class AutoUpdater:
         """
         # Si no se configura URL específica, usar la API pública de GitHub
         # Formato esperado: https://api.github.com/repos/USUARIO/REPO/releases/latest
-        api_url = self.update_url or "https://api.github.com/repos/TU_USUARIO/ecf-agent/releases/latest"
+        api_url = self.update_url or "https://api.github.com/repos/10GO-dev/ecf-agent/releases/latest"
 
         try:
             logger.info(f"Buscando actualizaciones en {api_url}...")

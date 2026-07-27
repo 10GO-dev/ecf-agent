@@ -88,3 +88,27 @@ agent:
             config.validate()
         
         assert "customer_rnc" in str(exc_info.value)
+
+    def test_normalize_section_is_loaded(self, tmp_path):
+        """Test carga de la sección normalize."""
+        config_content = """
+agent:
+  customer_rnc: "101010101"
+api:
+  base_url: "https://api.example.com"
+  endpoint: "/private/ecf/dgii-send"
+database:
+  driver: "sqlite"
+  database: "./data/test.db"
+  query: "SELECT 1"
+normalize:
+  xml_non_convertible_fields:
+    - MontoTotal
+    - MontoExento
+"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(config_content)
+
+        config = Config(str(config_file))
+
+        assert config.get("normalize.xml_non_convertible_fields") == ["MontoTotal", "MontoExento"]
