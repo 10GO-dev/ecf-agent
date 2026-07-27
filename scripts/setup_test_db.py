@@ -260,77 +260,77 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
     import time
     timestamp = str(int(time.time()))[-7:] # Generamos secuencia unica (7 digitos para sumar 12 con '3200' y el ID final)
     
-    # Factura 1 - Consumo (tipo 32)
-    cursor.execute(f"""
-        INSERT INTO interfazencf (
-            transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
-            IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
-            TipoIngresos, TipoPago, MontoPago, RNCEmisor, RazonSocialEmisor,
-            NombreComercial, DireccionEmisor, Municipioemisor, Provincia, FechaEmision, RNCComprador, RazonSocialComprador,
-            MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
-            MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
-        ) VALUES (
-            1, 2, '32', 'E320000000052', '31-12-2027',
-            '0', '0', '1', '01', '1', '1200.00', '130013454', 'TekServices Demo SRL',
-            'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '123456789', 'Consumidor Final',
-            '1016.95', '1016.95', '18', '183.05', '183.05',
-            '1200.00', '1200.00', 'DOP', '0', '0'
-        )
-    """)
+    # # Factura 1 - Consumo (tipo 32)
+    # cursor.execute(f"""
+    #     INSERT INTO interfazencf (
+    #         transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
+    #         IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
+    #         TipoIngresos, TipoPago, MontoPago, RNCEmisor, RazonSocialEmisor,
+    #         NombreComercial, DireccionEmisor, Municipioemisor, Provincia, FechaEmision, RNCComprador, RazonSocialComprador,
+    #         MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
+    #         MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
+    #     ) VALUES (
+    #         1, 2, '32', 'E320000010009', '31-12-2028',
+    #         '0', '0', '1', '01', '1', '1200.00', '130013454', 'TekServices Demo SRL',
+    #         'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '123456789', 'Consumidor Final',
+    #         '1016.95', '1016.95', '18', '183.05', '183.05',
+    #         '1200.00', '1200.00', 'DOP', '0', '0'
+    #     )
+    # """)
     
-    # Detalle de factura 1
-    cursor.execute("""
-        INSERT INTO interfazencfdet (
-            transaccionid, codalmacen, linea, NumeroLinea, IndicadorFacturacion,
-            tasaITBIS1, MontoITBIS1, TipoCodigo, CodigoItem, NombreItem,
-            IndicadorBienoServicio, CantidadItem, UnidadMedida, PrecioUnitarioItem, MontoItem
-        ) VALUES (
-            1, 2, 1, '1', '1', '18', '183.05', '01', 'PROD-001', 'Venta Consumidor',
-            '1', '1', '43', '1016.95', '1200.00'
-        )
-    """)
+    # # Detalle de factura 1
+    # cursor.execute("""
+    #     INSERT INTO interfazencfdet (
+    #         transaccionid, codalmacen, linea, NumeroLinea, IndicadorFacturacion,
+    #         tasaITBIS1, MontoITBIS1, TipoCodigo, CodigoItem, NombreItem,
+    #         IndicadorBienoServicio, CantidadItem, UnidadMedida, PrecioUnitarioItem, MontoItem
+    #     ) VALUES (
+    #         1, 2, 1, '1', '1', '18', '183.05', '01', 'PROD-001', 'Venta Consumidor',
+    #         '1', '1', '43', '1016.95', '1200.00'
+    #     )
+    # """)
     
-    # Forma de pago factura 1
-    cursor.execute("""
-        INSERT INTO ecfformapago (transaccionid, codalmacen, formapagoid, formapago, montopago)
-        VALUES (1, 2, 1, '1', 1200.00)
-    """)
+    # # Forma de pago factura 1
+    # cursor.execute("""
+    #     INSERT INTO ecfformapago (transaccionid, codalmacen, formapagoid, formapago, montopago)
+    #     VALUES (1, 2, 1, '1', 1200.00)
+    # """)
     
-    # Factura 2 - Consumo (tipo 32)
-    cursor.execute(f"""
-        INSERT INTO interfazencf (
-            transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
-            IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
-            TipoIngresos, TipoPago, MontoPago, RNCEmisor, RazonSocialEmisor,
-            NombreComercial, DireccionEmisor, Municipioemisor, Provincia, FechaEmision, RNCComprador, RazonSocialComprador,
-            MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
-            MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
-        ) VALUES (
-            2, 2, '32', 'E320000000053', '31-12-2027',
-            '0', '0', '1', '01', '1', '2500.00', '130013454', 'TekServices Demo SRL',
-            'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '987654321', 'Consumidor General',
-            '2118.64', '2118.64', '18', '381.36', '381.36',
-            '2500.00', '2500.00', 'DOP', '0', '0'
-        )
-    """)
+    # # Factura 2 - Consumo (tipo 32)
+    # cursor.execute(f"""
+    #     INSERT INTO interfazencf (
+    #         transaccionid, codalmacen, tipoecf, encf, FechaVencimientoSecuencia,
+    #         IndicadorNotaCredito, IndicadorEnvioDiferido, IndicadorMontoGravado,
+    #         TipoIngresos, TipoPago, MontoPago, RNCEmisor, RazonSocialEmisor,
+    #         NombreComercial, DireccionEmisor, Municipioemisor, Provincia, FechaEmision, RNCComprador, RazonSocialComprador,
+    #         MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
+    #         MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
+    #     ) VALUES (
+    #         2, 2, '32', 'E320000100010', '31-12-2028',
+    #         '0', '0', '1', '01', '1', '2500.00', '130013454', 'TekServices Demo SRL',
+    #         'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '987654321', 'Consumidor General',
+    #         '2118.64', '2118.64', '18', '381.36', '381.36',
+    #         '2500.00', '2500.00', 'DOP', '0', '0'
+    #     )
+    # """)
     
-    # Detalle factura 2
-    cursor.execute("""
-        INSERT INTO interfazencfdet (
-            transaccionid, codalmacen, linea, NumeroLinea, IndicadorFacturacion,
-            tasaITBIS1, MontoITBIS1, TipoCodigo, CodigoItem, NombreItem,
-            IndicadorBienoServicio, CantidadItem, UnidadMedida, PrecioUnitarioItem, MontoItem
-        ) VALUES (
-            2, 2, 1, '1', '1', '18', '381.36', '01', 'PROD-002', 'Venta Consumidor 2',
-            '1', '1', '43', '2118.64', '2500.00'
-        )
-    """)
+    # # Detalle factura 2
+    # cursor.execute("""
+    #     INSERT INTO interfazencfdet (
+    #         transaccionid, codalmacen, linea, NumeroLinea, IndicadorFacturacion,
+    #         tasaITBIS1, MontoITBIS1, TipoCodigo, CodigoItem, NombreItem,
+    #         IndicadorBienoServicio, CantidadItem, UnidadMedida, PrecioUnitarioItem, MontoItem
+    #     ) VALUES (
+    #         2, 2, 1, '1', '1', '18', '381.36', '01', 'PROD-002', 'Venta Consumidor 2',
+    #         '1', '1', '43', '2118.64', '2500.00'
+    #     )
+    # """)
     
-    # Forma de pago factura 2
-    cursor.execute("""
-        INSERT INTO ecfformapago (transaccionid, codalmacen, formapagoid, formapago, montopago)
-        VALUES (2, 2, 1, '1', 2500.00)
-    """)
+    # # Forma de pago factura 2
+    # cursor.execute("""
+    #     INSERT INTO ecfformapago (transaccionid, codalmacen, formapagoid, formapago, montopago)
+    #     VALUES (2, 2, 1, '1', 2500.00)
+    # """)
     
     # Factura 3 - Consumo (tipo 32)
     cursor.execute(f"""
@@ -342,7 +342,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            3, 2, '32', 'E320000000054', '31-12-2027',
+            3, 2, '32', 'E320000100010', '31-12-2028',
             '0', '0', '1', '01', '1', '800.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '111222333', 'Consumidor Express',
             '677.97', '677.97', '18', '122.03', '122.03',
@@ -378,7 +378,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            4, 2, '32', 'E320000000055', '31-12-2027',
+            4, 2, '32', 'E320000100016', '31-12-2028',
             '0', '0', '1', '01', '1', '300000.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '444555666', 'Consumidor Premium',
             '254237.29', '254237.29', '18', '45762.71', '45762.71',
