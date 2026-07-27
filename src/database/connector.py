@@ -124,13 +124,7 @@ class DatabaseConnector(ABC):
             logger.error(f"Error marcando factura {invoice_id} como procesada: {e}")
             return False
 
-    def mark_as_failed(
-        self,
-        ecf_number: Any,
-        error_message: str,
-        invoice_id: Any = None,
-        status_override: Optional[str] = None,
-    ) -> bool:
+    def mark_as_failed(self, ecf_number: Any, error_message: str, invoice_id: Any = None) -> bool:
         """
         Marca una factura como fallida en el ERP después de superar los reintentos.
         
@@ -138,7 +132,6 @@ class DatabaseConnector(ABC):
             ecf_number: Numero de comprobante e-CF
             error_message: Mensaje de error final
             invoice_id: ID interno de la factura (opcional)
-            status_override: Estado opcional si el query usa {status}
             
         Returns:
             True si se actualizó correctamente, False si no hay query configurada o falló
@@ -153,13 +146,7 @@ class DatabaseConnector(ABC):
         safe_error = str(error_message).replace("'", "''")
         safe_ecf = str(ecf_number).replace("'", "''")
         safe_id = str(invoice_id).replace("'", "''") if invoice_id is not None else ""
-        safe_status = str(status_override).replace("'", "''") if status_override is not None else ""
-        query = query_template.format(
-            ecf=safe_ecf,
-            id=safe_id,
-            error=safe_error,
-            status=safe_status,
-        )
+        query = query_template.format(ecf=safe_ecf, id=safe_id, error=safe_error)
         
         try:
             rows = self.execute_update(query)
@@ -224,23 +211,59 @@ class DatabaseConnector(ABC):
         safe_ecf = str(ecf_number).replace("'", "''")
         safe_status = str(status).replace("'", "''")
         safe_track_id = str(track_id).replace("'", "''") if track_id else ""
-        safe_error = str(error_message).replace("'", "''") if error_message else ""
         
         query = query_template.format(
             ecf=safe_ecf,
             status=safe_status,
-            track_id=safe_track_id,
-            error=safe_error,
+            track_id=safe_track_id
         )
-        
+
         try:
+            # Ejecutar UPDATE primero (camino rápido)
             rows = self.execute_update(query)
             if rows > 0:
                 logger.debug(f"Estado actualizado para e-CF {ecf_number}: {status}")
                 return True
-            else:
-                logger.warning(f"No se encontró el e-CF {ecf_number} para actualizar su estado")
+
+            # Si no se afectaron filas, intentamos confirmar si la fila existe
+            count = None
+            try:
+                qt = query_template.strip()
+                parts = qt.split()
+                table_name = None
+                if len(parts) >= 3 and parts[0].upper() == 'UPDATE':
+                    table_name = parts[1]
+
+                where_clause = None
+                if 'WHERE' in qt.upper():
+                    where_clause = qt.split('WHERE', 1)[1]
+
+                if table_name and where_clause:
+                    safe_where = where_clause.format(ecf=safe_ecf, status=safe_status, track_id=safe_track_id, error=error_message.replace("'", "''"))
+                    count_query = f"SELECT COUNT(*) as cnt FROM {table_name} WHERE {safe_where}"
+                    try:
+                        res = self.execute_query(count_query)
+                        if isinstance(res, list) and len(res) > 0:
+                            first = res[0]
+                            if 'cnt' in first:
+                                count = int(first['cnt'])
+                            else:
+                                count = int(list(first.values())[0])
+                    except Exception:
+                        count = None
+            except Exception:
+                count = None
+
+            if count is None:
+                logger.warning(f"No se encontró el e-CF {ecf_number} para actualizar su estado (rowcount=0)")
                 return False
+            elif count == 0:
+                logger.warning(f"No se encontró el e-CF {ecf_number} para actualizar su estado (no hay filas coincidentes)")
+                return False
+            else:
+                # La fila existe pero no hubo filas afectadas. Probablemente el valor ya era el mismo.
+                logger.info(f"Registro encontrado para e-CF {ecf_number} pero no se aplicaron cambios (estado posiblemente ya '{status}').")
+                return True
         except Exception as e:
             logger.error(f"Error actualizando estado del e-CF {ecf_number}: {e}")
             return False

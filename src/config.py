@@ -71,7 +71,7 @@ class Config:
         
         for env_path in env_paths:
             if env_path.exists():
-                load_dotenv(env_path)
+                load_dotenv(env_path, override=True)
                 logger.debug(f"Variables de entorno cargadas desde: {env_path}")
                 return
 

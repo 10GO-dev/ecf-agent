@@ -435,6 +435,8 @@ class ECFAgent:
                             logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
                             for res in results:
                                 ecf = res.get("ecf")
+                                if ecf not in ecf_to_id:
+                                    continue
                                 status = res.get("dgii_status") or res.get("status")
                                 track_id = res.get("dgii_track_id", "")
                                 error_msg = res.get("dgii_error", "")
@@ -564,6 +566,8 @@ class ECFAgent:
                         logger.info(f"Actualizando {len(results)} facturas desde sincronización asíncrona")
                         for res in results:
                             ecf = res.get("ecf")
+                            if ecf not in ecf_to_id:
+                                continue
                             status = res.get("dgii_status") or res.get("status")
                             track_id = res.get("dgii_track_id", "")
                             error_msg = res.get("dgii_error", "")
