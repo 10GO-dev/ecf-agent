@@ -244,7 +244,6 @@ class ECFAgent:
                 ecf,
                 error_message,
                 invoice_id,
-                status_override=self.validation_error_status,
             )
             if not updated:
                 self.db_connector.update_invoice_status(
