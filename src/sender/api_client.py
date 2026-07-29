@@ -171,19 +171,35 @@ class ECFApiClient:
 
                 code = data.get("error") or data.get("code")
                 message = data.get("message")
+                
+                parts = []
                 if code or message:
-                    return f"{code}: {message}" if code else str(message)
+                    parts.append(f"{code}: {message}" if code and message else (code or message))
 
                 errors = data.get("errors")
                 if isinstance(errors, list) and errors:
-                    first = errors[0]
-                    if isinstance(first, dict):
-                        first_code = first.get("error") or first.get("code")
-                        first_message = first.get("message")
-                        if first_code or first_message:
-                            return f"{first_code}: {first_message}" if first_code else str(first_message)
+                    sub_errors_msgs = []
+                    for err in errors:
+                        if isinstance(err, dict):
+                            ecf = err.get("ecf")
+                            err_code = err.get("error") or err.get("code")
+                            err_msg = err.get("message")
+                            
+                            sub_parts = []
+                            if ecf:
+                                sub_parts.append(f"[e-CF: {ecf}]")
+                            if err_code:
+                                sub_parts.append(err_code)
+                            if err_msg:
+                                sub_parts.append(err_msg)
+                            
+                            if sub_parts:
+                                sub_errors_msgs.append(" - " + " ".join(sub_parts))
+                    if sub_errors_msgs:
+                        parts.append("Detalles:")
+                        parts.extend(sub_errors_msgs)
 
-                return None
+                return "\n".join(parts) if parts else None
 
             if response.status_code != 200:
                 is_error = True
@@ -229,9 +245,10 @@ class ECFApiClient:
                                     break
 
             if is_error:
-                logger.error(f"API returned error-like response: {response.status_code} - {response_data} (reason: {error_reason})")
+                error_detail = extract_error_detail(response_data) or str(response_data)
+                logger.error(f"API returned error-like response (HTTP {response.status_code}):\n{error_detail} (reason: {error_reason})")
                 raise APIError(
-                    f"Error {response.status_code}: {response_data}",
+                    f"Error {response.status_code}:\n{error_detail}",
                     status_code=response.status_code,
                     response=response_data,
                 )
