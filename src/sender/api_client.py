@@ -166,40 +166,12 @@ class ECFApiClient:
             error_reason = None
 
             def extract_error_detail(data: Any) -> Optional[str]:
-                if not isinstance(data, dict):
-                    return None
-
-                code = data.get("error") or data.get("code")
-                message = data.get("message")
-                
-                parts = []
-                if code or message:
-                    parts.append(f"{code}: {message}" if code and message else (code or message))
-
-                errors = data.get("errors")
-                if isinstance(errors, list) and errors:
-                    sub_errors_msgs = []
-                    for err in errors:
-                        if isinstance(err, dict):
-                            ecf = err.get("ecf")
-                            err_code = err.get("error") or err.get("code")
-                            err_msg = err.get("message")
-                            
-                            sub_parts = []
-                            if ecf:
-                                sub_parts.append(f"[e-CF: {ecf}]")
-                            if err_code:
-                                sub_parts.append(err_code)
-                            if err_msg:
-                                sub_parts.append(err_msg)
-                            
-                            if sub_parts:
-                                sub_errors_msgs.append(" - " + " ".join(sub_parts))
-                    if sub_errors_msgs:
-                        parts.append("Detalles:")
-                        parts.extend(sub_errors_msgs)
-
-                return "\n".join(parts) if parts else None
+                if isinstance(data, dict):
+                    try:
+                        return json.dumps(data, indent=2, ensure_ascii=False)
+                    except Exception:
+                        pass
+                return str(data) if data is not None else None
 
             if response.status_code != 200:
                 is_error = True

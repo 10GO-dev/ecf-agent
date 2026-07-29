@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ecf-agent"
-version = "1.1.7"
+version = "1.1.8"
 description = "Agente de recolección de comprobantes fiscales electrónicos (e-CF)"
 readme = "README.md"
 license = {text = "MIT"}
