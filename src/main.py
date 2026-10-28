@@ -746,7 +746,8 @@ class ECFAgent:
 
         # Chequeo inicial de actualización
         logger.info("Verificando actualizaciones al inicio...")
-        if self.updater.check_and_update():
+        update_res = self.updater.check_and_update()
+        if (isinstance(update_res, dict) and update_res.get("updated")) or update_res is True:
             return
 
         # Ejecutar polling inicial

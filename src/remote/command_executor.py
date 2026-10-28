@@ -29,6 +29,8 @@ class CommandExecutor:
                 return {"success": True, "status": "ACTIVE"}
             elif cmd == "FETCH_LOGS":
                 return self._fetch_logs(params)
+            elif cmd in ("TRIGGER_UPDATE", "UPDATE_VERSION"):
+                return self._trigger_update(params)
             else:
                 return {"success": False, "error": f"Comando no reconocido: {cmd}"}
         except Exception as e:
@@ -78,3 +80,16 @@ class CommandExecutor:
                 return {"success": True, "lines": [line.rstrip() for line in selected]}
         except Exception as e:
             return {"success": False, "error": f"Error leyendo logs: {e}"}
+
+    def _trigger_update(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        target_version = params.get("target_version") or params.get("version")
+        with self.agent.db_lock:
+            result = self.agent.updater.check_and_update(
+                force=True,
+                restart_immediately=False,
+                target_version=target_version,
+            )
+            if result.get("needs_restart"):
+                import threading
+                threading.Timer(2.0, self.agent.updater.restart).start()
+            return result

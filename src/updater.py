@@ -5,8 +5,10 @@ Descarga y reemplaza el ejecutable si encuentra una nueva versión.
 
 import os
 import sys
-import time
 import shutil
+import tarfile
+import tempfile
+import zipfile
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -18,149 +20,305 @@ from loguru import logger
 from . import __version__
 
 class AutoUpdater:
-    """Gestor de actualizaciones automáticas."""
-
     def __init__(self, config: Dict[str, Any]):
-        """
-        Inicializa el actualizador.
-
-        Args:
-            config: Diccionario de configuración (sección 'agent').
-        """
         self.enabled = config.get("auto_update", False)
         self.update_url = config.get("update_url")
         self.current_version = __version__
         self.is_frozen = getattr(sys, "frozen", False)
         
-        # Ruta del ejecutable actual
         if self.is_frozen:
             self.app_path = Path(sys.executable)
         else:
-            # En desarrollo, no tiene sentido actualizar el .py
             self.app_path = Path(sys.argv[0])
 
-    def check_and_update(self) -> bool:
-        """
-        Verifica si hay actualizaciones en GitHub Releases y las aplica.
-        """
-        # Si no se configura URL específica, usar la API pública de GitHub
-        # Formato esperado: https://api.github.com/repos/USUARIO/REPO/releases/latest
-        api_url = self.update_url or "https://api.github.com/repos/10GO-dev/ecf-agent/releases/latest"
+    def check_and_update(
+        self,
+        force: bool = False,
+        restart_immediately: bool = True,
+        target_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if target_version:
+            clean_tag = target_version.lstrip("v")
+            api_url = f"https://api.github.com/repos/10GO-dev/ecf-agent/releases/tags/v{clean_tag}"
+        else:
+            api_url = self.update_url or "https://api.github.com/repos/10GO-dev/ecf-agent/releases/latest"
 
         try:
             logger.info(f"Buscando actualizaciones en {api_url}...")
             
-            response = requests.get(api_url, timeout=10)
+            response = requests.get(api_url, timeout=15)
             response.raise_for_status()
             
             release_data = response.json()
-            remote_tag = release_data.get("tag_name", "").lstrip("v") # ej. v1.0.1 -> 1.0.1
+            remote_tag = release_data.get("tag_name", "").lstrip("v")
             
             if not remote_tag:
                 logger.warning("No se pudo obtener la versión de la release.")
-                return False
+                return {"success": False, "error": "No se pudo obtener la versión de la release"}
 
             remote_version = version.parse(remote_tag)
             local_version = version.parse(self.current_version)
 
             logger.info(f"Versión local: {local_version}, Remota: {remote_version}")
 
-            if remote_version <= local_version:
+            if remote_version <= local_version and not target_version:
                 logger.debug("El agente está actualizado.")
-                return False
+                return {
+                    "success": True,
+                    "updated": False,
+                    "old_version": self.current_version,
+                    "new_version": self.current_version,
+                    "message": f"El agente ya se encuentra en la versión más reciente ({self.current_version}).",
+                }
 
-            # NOTIFICACIÓN DE ACTUALIZACIÓN
             logger.warning(
                 f"🚨 ¡NUEVA ACTUALIZACIÓN DISPONIBLE! "
                 f"Versión instalada: {local_version} -> Nueva versión: {remote_version}"
             )
 
-            if not self.is_frozen:
-                logger.info("Ejecutando desde código fuente, no se puede auto-actualizar automáticamente. Actualice manualmente.")
-                return False
+            if not force and not self.enabled:
+                logger.info("Auto-actualización deshabilitada. Por favor, actualice manualmente o vía comando remoto.")
+                return {
+                    "success": True,
+                    "updated": False,
+                    "available_version": remote_tag,
+                    "old_version": self.current_version,
+                    "message": f"Nueva versión {remote_tag} disponible, pero auto-actualización está deshabilitada.",
+                }
 
-            if not self.enabled:
-                logger.info("Auto-actualización deshabilitada. Por favor, actualice manualmente.")
-                return False
+            logger.info(f"Iniciando actualización a {remote_version} (frozen={self.is_frozen})...")
 
-            logger.info(f"Iniciando actualización automática a {remote_version}...")
-            logger.info(f"Buscando asset compatible...")
-            
-            # Buscar el asset correcto según el OS
-            asset_url = None
-            target_name = "ecf-agent-windows.exe" if sys.platform == "win32" else "ecf-agent-linux"
-            
+            if self.is_frozen:
+                result = self._apply_binary_update(release_data, remote_tag)
+            else:
+                result = self._apply_source_update(release_data, remote_tag)
+
+            if result.get("success") and restart_immediately:
+                self.restart()
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error durante actualización: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _extract_archive(self, archive_path: Path, extract_dir: Path):
+        name = archive_path.name.lower()
+        if name.endswith((".tar.gz", ".tgz", ".tar")):
+            with tarfile.open(archive_path, "r:*") as tar:
+                if hasattr(tarfile, 'data_filter'):
+                    tar.extractall(extract_dir, filter='data')
+                else:
+                    tar.extractall(extract_dir)
+        elif name.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+    def _apply_source_update(self, release_data: Dict[str, Any], remote_tag: str) -> Dict[str, Any]:
+        temp_dir = Path(tempfile.mkdtemp(prefix="ecf_agent_src_update_"))
+        try:
+            download_url = None
+            archive_ext = ".tar.gz"
+
             for asset in release_data.get("assets", []):
-                if asset["name"] == target_name:
+                name = asset.get("name", "").lower()
+                if name.endswith(".tar.gz") or name.endswith(".tgz"):
+                    download_url = asset["browser_download_url"]
+                    archive_ext = ".tar.gz"
+                    break
+                elif name.endswith(".zip"):
+                    download_url = asset["browser_download_url"]
+                    archive_ext = ".zip"
+                    break
+
+            if not download_url:
+                download_url = release_data.get("tarball_url") or release_data.get("zipball_url")
+                if download_url and "zipball" in download_url:
+                    archive_ext = ".zip"
+
+            if not download_url:
+                return {
+                    "success": False,
+                    "error": f"No se encontró código fuente en la release {remote_tag}",
+                }
+
+            archive_path = temp_dir / f"release{archive_ext}"
+            self._download_file(download_url, archive_path)
+
+            extract_dir = temp_dir / "extracted"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            self._extract_archive(archive_path, extract_dir)
+
+            candidate_src = None
+            for p in extract_dir.rglob("src"):
+                if p.is_dir() and (p / "__init__.py").exists() and (p / "main.py").exists():
+                    candidate_src = p
+                    break
+
+            if not candidate_src:
+                return {
+                    "success": False,
+                    "error": "No se encontró el directorio src válido dentro del archivo descargado",
+                }
+
+            root_dir = Path(__file__).resolve().parent.parent
+            target_src = root_dir / "src"
+            backup_src = root_dir / "src_old"
+
+            if backup_src.exists():
+                shutil.rmtree(backup_src, ignore_errors=True)
+
+            target_src.rename(backup_src)
+            try:
+                shutil.copytree(candidate_src, target_src)
+            except Exception as copy_err:
+                if backup_src.exists() and not target_src.exists():
+                    backup_src.rename(target_src)
+                raise copy_err
+
+            candidate_req = None
+            for req in extract_dir.rglob("requirements.txt"):
+                if req.is_file():
+                    candidate_req = req
+                    break
+
+            if candidate_req and candidate_req.exists():
+                target_req = root_dir / "requirements.txt"
+                shutil.copy2(candidate_req, target_req)
+
+                pip_path = None
+                if (root_dir / "venv" / "bin" / "pip").exists():
+                    pip_path = str(root_dir / "venv" / "bin" / "pip")
+                elif (root_dir / "venv" / "Scripts" / "pip.exe").exists():
+                    pip_path = str(root_dir / "venv" / "Scripts" / "pip.exe")
+
+                if pip_path:
+                    try:
+                        logger.info("Actualizando dependencias con pip...")
+                        subprocess.run(
+                            [pip_path, "install", "-r", str(target_req)],
+                            check=True,
+                            timeout=180,
+                            capture_output=True,
+                        )
+                    except Exception as pip_err:
+                        logger.warning(f"Error actualizando paquetes pip: {pip_err}")
+
+            shutil.rmtree(backup_src, ignore_errors=True)
+
+            old_version = self.current_version
+            self.current_version = remote_tag
+            return {
+                "success": True,
+                "updated": True,
+                "old_version": old_version,
+                "new_version": remote_tag,
+                "message": f"Actualización de código fuente a v{remote_tag} completada exitosamente.",
+                "needs_restart": True,
+            }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _apply_binary_update(self, release_data: Dict[str, Any], remote_tag: str) -> Dict[str, Any]:
+        temp_dir = Path(tempfile.mkdtemp(prefix="ecf_agent_bin_update_"))
+        try:
+            asset_url = None
+            is_win = sys.platform == "win32"
+            target_asset_name = "ecf-agent-windows.zip" if is_win else "ecf-agent-linux.tar.gz"
+
+            for asset in release_data.get("assets", []):
+                name = asset.get("name", "")
+                if name == target_asset_name:
                     asset_url = asset["browser_download_url"]
                     break
-            
-            # Fallback para nombres antiguos o genericos
-            if not asset_url and sys.platform == "win32":
-                 for asset in release_data.get("assets", []):
-                    if asset["name"].endswith(".exe"):
+
+            if not asset_url:
+                for asset in release_data.get("assets", []):
+                    name = asset.get("name", "").lower()
+                    if is_win and (name.endswith(".zip") or name.endswith(".exe")):
+                        asset_url = asset["browser_download_url"]
+                        break
+                    elif not is_win and (name.endswith(".tar.gz") or name == "ecf-agent"):
                         asset_url = asset["browser_download_url"]
                         break
 
             if not asset_url:
-                logger.error(f"No se encontró un ejecutable compatible en la release {remote_tag}.")
-                return False
-            
-            logger.info(f"Descargando actualización desde: {asset_url}")
+                return {
+                    "success": False,
+                    "error": f"No se encontró binario compatible en release {remote_tag}",
+                }
 
-            # Descargar el nuevo ejecutable
-            new_exe_path = self.app_path.with_suffix(".new.exe") if sys.platform == "win32" else self.app_path.with_suffix(".new")
-            self._download_file(asset_url, new_exe_path)
+            download_path = temp_dir / ("update.zip" if ".zip" in asset_url else "update.tar.gz" if ".tar.gz" in asset_url else "update.bin")
+            self._download_file(asset_url, download_path)
 
-            if new_exe_path.stat().st_size == 0:
-                logger.error("Descarga fallida (archivo vacío).")
-                new_exe_path.unlink(missing_ok=True)
-                return False
+            extracted_exe = None
+            if download_path.name.endswith((".zip", ".tar.gz", ".tgz")):
+                extract_dir = temp_dir / "extracted"
+                extract_dir.mkdir(parents=True, exist_ok=True)
+                self._extract_archive(download_path, extract_dir)
 
-            logger.info("Descarga completada. Aplicando actualización...")
+                target_filename = "ecf-agent.exe" if is_win else "ecf-agent"
+                for p in extract_dir.rglob(target_filename):
+                    if p.is_file():
+                        extracted_exe = p
+                        break
+            else:
+                extracted_exe = download_path
 
-            # Reemplazar ejecutable (Windows: rename trick; Linux: overwrite directly usually works or rename)
-            backup_path = self.app_path.with_suffix(".old.exe") if sys.platform == "win32" else self.app_path.with_suffix(".old")
-            
+            if not extracted_exe or not extracted_exe.exists():
+                return {
+                    "success": False,
+                    "error": "No se encontró el ejecutable dentro del archivo descargado",
+                }
+
+            backup_path = self.app_path.with_suffix(".old.exe") if is_win else self.app_path.with_suffix(".old")
             if backup_path.exists():
                 backup_path.unlink()
 
             self.app_path.rename(backup_path)
-            new_exe_path.rename(self.app_path)
-            
-            if sys.platform != "win32":
-                self.app_path.chmod(0o755) # Asegurar ejecutable en Linux
-            
-            logger.warning("Actualización aplicada. Reiniciando servicio...")
-            self._restart()
-            return True
+            shutil.copy2(extracted_exe, self.app_path)
 
-        except Exception as e:
-            logger.error(f"Error durante actualización: {e}")
-            return False
+            if not is_win:
+                self.app_path.chmod(0o755)
+
+            old_version = self.current_version
+            self.current_version = remote_tag
+            return {
+                "success": True,
+                "updated": True,
+                "old_version": old_version,
+                "new_version": remote_tag,
+                "message": f"Actualización binaria a v{remote_tag} completada exitosamente.",
+                "needs_restart": True,
+            }
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _download_file(self, url: str, target: Path):
-        """Descarga un archivo con stream."""
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(target, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-    def _restart(self):
-        """Reinicia la aplicación."""
-        logger.info("Reiniciando proceso...")
-        # Asegurar que logs se escriban
+    def restart(self):
+        logger.info("Reiniciando proceso del agente...")
         sys.stdout.flush()
         sys.stderr.flush()
-        
-        # Ejecutar nuevo proceso
-        # subprocess.Popen detaches the new process
         if sys.platform == 'win32':
-             subprocess.Popen([str(self.app_path)] + sys.argv[1:])
+            if self.is_frozen:
+                subprocess.Popen([str(self.app_path)] + sys.argv[1:])
+            else:
+                args = [sys.executable, sys.argv[0]] + sys.argv[1:]
+                subprocess.Popen(args)
+            sys.exit(0)
         else:
-             # Linux/Unix exec replaces the process
-             os.execv(sys.executable, [sys.executable] + sys.argv[1:])
-        
-        # Salir del proceso actual
-        sys.exit(0)
+            try:
+                if self.is_frozen:
+                    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+                else:
+                    args = [sys.executable, sys.argv[0]] + sys.argv[1:]
+                    os.execv(sys.executable, args)
+            except Exception as e:
+                logger.warning(f"Error reiniciando con execv ({e}), saliendo para reinicio por systemd...")
+                sys.exit(0)

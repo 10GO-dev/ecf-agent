@@ -80,7 +80,7 @@ def test_heartbeat_manager_pulse():
     agent = MagicMock()
     agent.retry_queue.count.return_value = 3
     agent.paused = False
-    agent.version = "1.2.0"
+    agent.version = "1.2.1"
     agent.config_version = "hash123"
     agent.api_client.send_heartbeat.return_value = {
         "success": True,
@@ -103,3 +103,61 @@ def test_heartbeat_manager_pulse():
     result_arg = agent.api_client.send_command_result.call_args[0][0]
     assert result_arg["command_id"] == "cmd-1"
     assert result_arg["status"] == "COMPLETED"
+
+
+def test_command_executor_trigger_update():
+    agent = MagicMock()
+    agent.updater.check_and_update.return_value = {
+        "success": True,
+        "updated": True,
+        "needs_restart": True,
+        "old_version": "1.2.0",
+        "new_version": "1.2.1",
+    }
+    executor = CommandExecutor(agent)
+
+    res = executor.execute("TRIGGER_UPDATE", {"target_version": "1.2.1"})
+    assert res["success"] is True
+    assert res["updated"] is True
+    agent.updater.check_and_update.assert_called_once_with(
+        force=True,
+        restart_immediately=False,
+        target_version="1.2.1",
+    )
+
+
+def test_auto_updater_check_up_to_date(monkeypatch):
+    from src.updater import AutoUpdater
+    updater = AutoUpdater({"auto_update": True})
+    updater.current_version = "1.2.0"
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"tag_name": "v1.2.0"}
+    mock_response.raise_for_status.return_value = None
+
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    res = updater.check_and_update()
+    assert res["success"] is True
+    assert res["updated"] is False
+    assert res["new_version"] == "1.2.0"
+
+
+def test_auto_updater_extract_archive(tmp_path):
+    import tarfile
+    from src.updater import AutoUpdater
+    updater = AutoUpdater({"auto_update": True})
+
+    sample_tar = tmp_path / "test.tar.gz"
+    inner_file = tmp_path / "hello.txt"
+    inner_file.write_text("world")
+
+    with tarfile.open(sample_tar, "w:gz") as tar:
+        tar.add(inner_file, arcname="hello.txt")
+
+    out_dir = tmp_path / "extracted"
+    out_dir.mkdir()
+    updater._extract_archive(sample_tar, out_dir)
+
+    assert (out_dir / "hello.txt").exists()
+    assert (out_dir / "hello.txt").read_text() == "world"
