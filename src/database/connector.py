@@ -68,6 +68,20 @@ class DatabaseConnector(ABC):
         """
         pass
 
+    def execute_scalar(self, query: str, params: Optional[Dict] = None) -> Any:
+        """
+        Ejecuta una query y retorna el primer valor de la primera columna.
+        """
+        rows = self.execute_query(query, params)
+        if rows and len(rows) > 0:
+            first = rows[0]
+            if isinstance(first, dict):
+                return next(iter(first.values()))
+            elif isinstance(first, (list, tuple)):
+                return first[0]
+            return first
+        return None
+
     def get_pending_invoices(self, batch_size: int = 50) -> List[Dict[str, Any]]:
         """
         Obtiene facturas pendientes de procesar.
@@ -306,6 +320,10 @@ class MySQLConnector(DatabaseConnector):
         try:
             import pymysql
             
+            connect_timeout = int(self.config.get("connect_timeout", 10))
+            read_timeout = int(self.config.get("read_timeout", 30))
+            write_timeout = int(self.config.get("write_timeout", 30))
+            
             self.connection = pymysql.connect(
                 host=self.config.get("host", "localhost"),
                 port=int(self.config.get("port", 3306)),
@@ -314,6 +332,9 @@ class MySQLConnector(DatabaseConnector):
                 database=self.config.get("database"),
                 charset=self.config.get("charset", "utf8"),
                 cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                write_timeout=write_timeout,
             )
             logger.debug("Conectado a MySQL")
         except ImportError:

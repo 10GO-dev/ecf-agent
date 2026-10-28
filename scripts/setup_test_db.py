@@ -342,7 +342,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            3, 2, '32', 'E320000100010', '31-12-2028',
+            3, 2, '32', 'E320000100114', '31-12-2028',
             '0', '0', '1', '01', '1', '800.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '111222333', 'Consumidor Express',
             '677.97', '677.97', '18', '122.03', '122.03',
@@ -378,7 +378,7 @@ def create_test_database(db_path: str = "./data/test_invoices.db"):
             MontoGravadoTotal, MontoGravadoI1, Itbistasa1, TotalITBIS, TotalITBIS1,
             MontoTotal, ValorPagar, TipoMoneda, estado, procesadadgii
         ) VALUES (
-            4, 2, '32', 'E320000100016', '31-12-2028',
+            4, 2, '32', 'E320000110020', '31-12-2028',
             '0', '0', '1', '01', '1', '300000.00', '130013454', 'TekServices Demo SRL',
             'TekDemo', 'Av. 27 de Febrero', '020100', '020000', '14-02-2026', '444555666', 'Consumidor Premium',
             '254237.29', '254237.29', '18', '45762.71', '45762.71',

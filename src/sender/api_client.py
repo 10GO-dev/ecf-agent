@@ -207,7 +207,7 @@ class ECFApiClient:
                         for r in results:
                             if isinstance(r, dict):
                                 status = r.get("status")
-                                if isinstance(status, str) and status.lower() not in ("ok", "success", "processed", "200"):
+                                if isinstance(status, str) and status.lower() not in ("ok", "success", "processed", "200", "retry_pending"):
                                     is_error = True
                                     error_reason = f"item status: {status}"
                                     break
@@ -306,6 +306,64 @@ class ECFApiClient:
         except httpx.RequestError as e:
             logger.error(f"Error de conexión al consultar estados: {e}")
             raise APIError(f"Error de conexión al consultar estados: {e}")
+
+    def fetch_remote_config(self, etag: Optional[str] = None) -> tuple[int, Optional[Dict[str, Any]], Optional[str]]:
+        headers = {}
+        if etag:
+            clean_etag = etag if etag.startswith('"') else f'"{etag}"'
+            headers["If-None-Match"] = clean_etag
+
+        client = self._get_client()
+        endpoints = ["/private/ecf/agent/config", "/agent/config"]
+
+        for ep in endpoints:
+            try:
+                response = client.get(ep, headers=headers)
+                if response.status_code == 304:
+                    return 304, None, etag
+
+                if response.status_code == 200:
+                    raw_etag = response.headers.get("etag") or response.headers.get("ETag")
+                    new_etag = raw_etag.replace('"', '') if raw_etag else None
+                    data = response.json()
+                    return 200, data.get("data", data), new_etag
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 304:
+                    return 304, None, etag
+            except Exception as e:
+                logger.debug(f"Error fetching remote config from {ep}: {e}")
+
+        return 0, None, None
+
+    def send_heartbeat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        client = self._get_client()
+        endpoints = ["/private/ecf/agent/heartbeat", "/agent/heartbeat"]
+
+        for ep in endpoints:
+            try:
+                response = client.post(ep, json=payload)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code not in (404, 301, 302):
+                    logger.warning(f"Heartbeat endpoint {ep} respondió HTTP {response.status_code}: {response.text}")
+            except Exception as e:
+                logger.debug(f"Heartbeat attempt to {ep} failed: {e}")
+
+        return {"success": False, "config_outdated": False, "pending_commands": []}
+
+    def send_command_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        client = self._get_client()
+        endpoints = ["/private/ecf/agent/command-result", "/agent/command-result"]
+
+        for ep in endpoints:
+            try:
+                response = client.post(ep, json=payload)
+                if response.status_code == 200:
+                    return response.json()
+            except Exception as e:
+                logger.debug(f"Command result send to {ep} failed: {e}")
+
+        return {"success": False}
 
     def test_connection(self) -> bool:
         """

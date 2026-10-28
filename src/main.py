@@ -23,6 +23,7 @@ from .queue import RetryQueue
 from .scheduler import JobManager
 from .sender import ECFApiClient, APIError
 from .updater import AutoUpdater
+from .remote.heartbeat import HeartbeatManager
 
 
 def sanitize_for_serialization(obj: Any) -> Any:
@@ -108,6 +109,9 @@ class ECFAgent:
         """
         self.config = config
         self.running = False
+        self.paused = False
+        self.version = __version__
+        self.last_poll_count = 0
         
         # Componentes
         self.db_connector = create_connector(config.database)
@@ -117,6 +121,7 @@ class ECFAgent:
         )
         self.job_manager = JobManager()
         self.updater = AutoUpdater(config.agent)
+        self.heartbeat_manager = HeartbeatManager(self)
         self.db_lock = threading.RLock()
         
         # Configuración del agente
@@ -252,7 +257,7 @@ class ECFAgent:
                     error_message=error_message,
                 )
 
-            if remove_from_retry and invoice_id:
+            if invoice_id:
                 self.retry_queue.remove(invoice_id)
 
         if validation_ecfs:
@@ -267,11 +272,16 @@ class ECFAgent:
         """
         Trabajo principal: obtiene facturas de la BD y las envía al servidor.
         """
+        if getattr(self, "paused", False):
+            logger.debug("Agente pausado remotamente, omitiendo polling.")
+            return 0
+
         logger.info("Iniciando polling de facturas...")
         try:
             with self.db_lock:
                 with self.db_connector:
                     invoices = self.db_connector.get_pending_invoices(self.batch_size)
+                    self.last_poll_count = len(invoices) if invoices else 0
 
                     if not invoices:
                         logger.debug("No hay facturas pendientes")
@@ -286,7 +296,7 @@ class ECFAgent:
 
                     invoices = filtered_invoices
                     if not invoices:
-                        logger.debug("Todas las facturas pendientes están bajo gestión de reintentos")
+                        logger.info("Todas las facturas pendientes están bajo gestión de reintentos")
                         return
 
                     logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
@@ -453,7 +463,7 @@ class ECFAgent:
                                             )
                                         continue
                                     local_status = str(mapping.get(status_key))
-                                    if error_msg:
+                                    if status_key == "conditional_accepted" and error_msg:
                                         logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                     self.db_connector.update_invoice_status(ecf, local_status, track_id)
 
@@ -473,13 +483,13 @@ class ECFAgent:
                         success_ecfs = {
                             res.get("ecf")
                             for res in results_list
-                            if isinstance(res, dict) and res.get("status") in ("ok", "success", "processed", "200")
+                            if isinstance(res, dict) and str(res.get("status", "")).lower() in ("ok", "success", "processed", "200", "retry_pending")
                         }
 
                         if validation_ecfs:
                             failed_ecfs = {ecf for ecf in failed_ecfs if ecf not in validation_ecfs}
 
-                        if not failed_ecfs and not success_ecfs:
+                        if not failed_ecfs and not success_ecfs and not validation_ecfs:
                             for i, invoice in enumerate(invoices_to_send):
                                 self.retry_queue.add(
                                     invoice_id=str(invoice_ids[i]),
@@ -511,7 +521,8 @@ class ECFAgent:
                                     added_to_retry += 1
                                 else:
                                     self.db_connector.mark_as_processed(invoice_id)
-                            logger.info(f"{added_to_retry} facturas enviadas a cola de reintentos por fallo parcial")
+                            if added_to_retry > 0:
+                                logger.info(f"{added_to_retry} facturas enviadas a cola de reintentos por fallo parcial")
 
                     except Exception as e:
                         logger.error(f"Error genérico enviando batch o actualizando estados: {e}")
@@ -547,11 +558,11 @@ class ECFAgent:
                     
                     # Extraemos solo los números de ECF
                     ecf_field_name = self.config.get("database.ecf_field", "encf")
-                    ecfs_to_sync = [row.get(ecf_field_name) for row in pending_invoices if row.get(ecf_field_name)]
+                    ecfs_to_sync = [str(row.get(ecf_field_name)) for row in pending_invoices if row.get(ecf_field_name)]
                     ecf_to_id = {
-                        row.get(ecf_field_name): row.get("id")
+                        str(row.get(ecf_field_name)): row.get("id")
                         for row in pending_invoices
-                        if row.get(ecf_field_name) and row.get("id")
+                        if row.get(ecf_field_name)
                     }
                     
                     if not ecfs_to_sync:
@@ -584,7 +595,7 @@ class ECFAgent:
                                         )
                                     continue
                                 local_status = str(mapping.get(status_key))
-                                if error_msg:
+                                if status_key == "conditional_accepted" and error_msg:
                                     logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
                                 self.db_connector.update_invoice_status(ecf, local_status, track_id)
                             
@@ -692,6 +703,14 @@ class ECFAgent:
         logger.info(f"ECF Agent v{__version__} iniciando...")
         logger.info(f"RNC Cliente: {self.customer_rnc}")
         
+        # Sincronización remota inicial
+        try:
+            if self.config.sync_remote(self.api_client):
+                self._reapply_config_fields()
+                logger.info("Configuración remota sincronizada.")
+        except Exception as e:
+            logger.debug(f"Sincronización remota inicial omitida: {e}")
+
         # Configurar trabajos
         polling_interval = self.config.get("agent.polling_interval_seconds", 30)
         retry_interval = self.config.get("agent.retry_interval_seconds", 300)
@@ -702,8 +721,14 @@ class ECFAgent:
         self.job_manager.add_job(self.sync_statuses, interval_seconds=status_sync_interval)
         self.job_manager.add_cleanup_job(self.cleanup, interval_hours=24)
         
+        # Configurar heartbeat remoto
+        self.job_manager.add_job(
+            self.heartbeat_manager.pulse,
+            interval_seconds=self.heartbeat_manager.current_interval,
+            name="heartbeat",
+        )
+
         # Configurar auto-actualización (check cada 4 horas)
-        # Siempre agendamos el check para poder notificar, aunque auto_update sea False
         self.job_manager.add_job(
              self.updater.check_and_update, 
              interval_seconds=4 * 3600
@@ -716,10 +741,13 @@ class ECFAgent:
         self.running = True
         self.job_manager.start()
         
+        # Pulso inicial de telemetría
+        self.heartbeat_manager.pulse()
+
         # Chequeo inicial de actualización
         logger.info("Verificando actualizaciones al inicio...")
         if self.updater.check_and_update():
-            return  # Si se actualizó, salir/reiniciar (solo pasa si enabled=True)
+            return
 
         # Ejecutar polling inicial
         self.poll_invoices()
@@ -734,6 +762,43 @@ class ECFAgent:
             pass
         finally:
             self.stop()
+
+    def reload_config(self) -> bool:
+        logger.info("Recargando configuración remota...")
+        try:
+            changed = self.config.sync_remote(self.api_client)
+            if changed:
+                self._reapply_config_fields()
+                with self.db_lock:
+                    if hasattr(self.db_connector, "close"):
+                        try:
+                            self.db_connector.close()
+                        except Exception:
+                            pass
+                    self.db_connector = create_connector(self.config.database)
+                logger.info("Configuración remota recargada y conector BD actualizado exitosamente.")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error recargando configuración remota: {e}")
+            return False
+
+    def _reapply_config_fields(self):
+        self.customer_rnc = self.config.get("agent.customer_rnc", self.customer_rnc)
+        self.batch_size = self.config.get("agent.batch_size", self.batch_size)
+        self.max_retries = self.config.get("agent.max_retries", self.max_retries)
+        self.compression_method = self.config.get("api.compression", self.compression_method)
+        self.id_field = self.config.get("database.id_field", self.id_field)
+        self.ecf_field = self.config.get("database.ecf_field", self.ecf_field)
+        self.type_field = self.config.get("database.type_field", self.type_field)
+        self.rnc_buyer_field = self.config.get("database.rnc_buyer_field", self.rnc_buyer_field)
+        self.total_field = self.config.get("database.total_field", self.total_field)
+
+        non_convertible = self.config.get("normalize.xml_non_convertible_fields", [])
+        if isinstance(non_convertible, str):
+            non_convertible = [non_convertible]
+        if isinstance(non_convertible, list):
+            self.xml_non_convertible_fields = {str(f).strip() for f in non_convertible if str(f).strip()}
 
     def run_once(self):
         """Ejecuta un solo ciclo de polling (para testing/debug)."""

@@ -24,10 +24,11 @@ class JobManager:
     def __init__(self):
         """Inicializa el gestor de trabajos."""
         self.scheduler = BackgroundScheduler(
-            executors={"default": ThreadPoolExecutor(max_workers=1)},
+            executors={"default": ThreadPoolExecutor(max_workers=5)},
             job_defaults={
-                "coalesce": True,  # Combinar ejecuciones perdidas
-                "max_instances": 1,  # Solo una instancia por job
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": 60,
             }
         )
         self._jobs: Dict[str, str] = {}  # nombre -> job_id
@@ -110,11 +111,12 @@ class JobManager:
         func: Callable,
         interval_seconds: int = 60,
         name: Optional[str] = None,
+        job_id: Optional[str] = None,
     ):
         """
         Agrega un trabajo genérico por intervalo de segundos.
         """
-        job_name = name or func.__name__
+        job_name = job_id or name or func.__name__
         job = self.scheduler.add_job(
             func,
             trigger=IntervalTrigger(seconds=interval_seconds),

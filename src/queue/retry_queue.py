@@ -257,6 +257,14 @@ class RetryQueue:
                 "oldest_pending": oldest,
             }
 
+    def count(self) -> int:
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute("SELECT COUNT(*) as count FROM pending_invoices").fetchone()
+                return int(row["count"]) if row else 0
+        except Exception:
+            return 0
+
     def cleanup_old(self, max_age_days: int = 7) -> int:
         """
         Limpia facturas muy antiguas de la cola.

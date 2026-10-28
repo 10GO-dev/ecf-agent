@@ -3,6 +3,7 @@ Módulo de configuración del agente ECF.
 Carga configuración desde YAML y variables de entorno.
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -30,6 +31,7 @@ class Config:
                         Si no se especifica, busca en ./config/config.yaml
         """
         self._config: Dict[str, Any] = {}
+        self.config_version: Optional[str] = None
         self._config_path = self._resolve_config_path(config_path)
         
         # Cargar variables de entorno desde .env
@@ -176,6 +178,76 @@ class Config:
     def logging(self) -> Dict[str, Any]:
         """Configuración de logging."""
         return self._config.get("logging", {})
+
+    def apply_remote_resources(self, resources: Dict[str, Any], version: Optional[str] = None) -> bool:
+        changed = False
+
+        if "config" in resources and resources["config"].get("content"):
+            try:
+                remote_cfg = yaml.safe_load(resources["config"]["content"]) or {}
+                if isinstance(remote_cfg, dict):
+                    for sec in ("agent", "api", "logging"):
+                        if sec in remote_cfg and isinstance(remote_cfg[sec], dict):
+                            self._config.setdefault(sec, {})
+                            self._config[sec].update(remote_cfg[sec])
+                            changed = True
+            except Exception as e:
+                logger.warning(f"Error parseando sección config remota: {e}")
+
+        if "queries" in resources and resources["queries"].get("content"):
+            try:
+                queries_content = resources["queries"]["content"]
+                parsed_queries = yaml.safe_load(queries_content)
+                if isinstance(parsed_queries, dict):
+                    self._config.setdefault("database", {})
+                    self._config["database"].update(parsed_queries)
+                    changed = True
+            except Exception as e:
+                logger.warning(f"Error parseando queries remotas: {e}")
+
+        if "mapping" in resources and resources["mapping"].get("content"):
+            try:
+                mapping_content = resources["mapping"]["content"]
+                parsed_mapping = json.loads(mapping_content)
+                if isinstance(parsed_mapping, dict):
+                    self._config.setdefault("database", {})
+                    for field in ("id_field", "ecf_field", "type_field", "rnc_buyer_field", "total_field", "processed_field", "status_mapping"):
+                        if field in parsed_mapping:
+                            self._config["database"][field] = parsed_mapping[field]
+                    if "xml_non_convertible_fields" in parsed_mapping:
+                        self._config.setdefault("normalize", {})
+                        self._config["normalize"]["xml_non_convertible_fields"] = parsed_mapping["xml_non_convertible_fields"]
+                    changed = True
+            except Exception as e:
+                logger.warning(f"Error parseando mapping remoto: {e}")
+
+        if version:
+            self.config_version = version
+
+        if changed:
+            self._save_effective_cache()
+
+        return changed
+
+    def _save_effective_cache(self):
+        try:
+            cache_file = Path("./data/effective_config.json")
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_data = {
+                "version": self.config_version,
+                "config": self._config,
+            }
+            cache_file.write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"No se pudo guardar effective_config.json: {e}")
+
+    def sync_remote(self, api_client: Any) -> bool:
+        status, data, etag = api_client.fetch_remote_config(self.config_version)
+        if status == 200 and data and isinstance(data, dict):
+            resources = data.get("resources", {})
+            version = data.get("version", etag)
+            return self.apply_remote_resources(resources, version)
+        return False
 
     def validate(self) -> bool:
         """

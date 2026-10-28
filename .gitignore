@@ -54,3 +54,8 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+
+# Scratch & temporary scripts
+scratch/
+script.sql
+
