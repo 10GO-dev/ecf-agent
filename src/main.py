@@ -41,6 +41,23 @@ def sanitize_for_serialization(obj: Any) -> Any:
     return obj
 
 
+def _extract_record_tid(record: Any, fallback_field: Optional[str] = None) -> Optional[str]:
+    if not isinstance(record, dict):
+        return None
+    for k in ("transaccionid", "transaccion_id", "transaction_id", "id"):
+        if k in record and record[k] is not None:
+            return str(record[k]).strip()
+    if fallback_field and fallback_field in record and record[fallback_field] is not None:
+        return str(record[fallback_field]).strip()
+    lower_map = {str(k).lower(): v for k, v in record.items()}
+    for k in ("transaccionid", "transaccion_id", "transaction_id", "id"):
+        if k in lower_map and lower_map[k] is not None:
+            return str(lower_map[k]).strip()
+    if fallback_field and fallback_field.lower() in lower_map and lower_map[fallback_field.lower()] is not None:
+        return str(lower_map[fallback_field.lower()]).strip()
+    return None
+
+
 NULLISH_STRINGS = {"", "nl", "nll", "null", "none"}
 
 
@@ -292,7 +309,10 @@ class ECFAgent:
 
         logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
 
-        raw_invoice_ids = [row.get(self.id_field) for row in invoices]
+        raw_invoice_ids = [
+            str(row.get(self.id_field) if row.get(self.id_field) is not None else _extract_record_tid(row))
+            for row in invoices
+        ]
         grouped_details = {str(id_): [] for id_ in raw_invoice_ids}
         grouped_taxes = {str(id_): [] for id_ in raw_invoice_ids}
         grouped_payments = {str(id_): [] for id_ in raw_invoice_ids}
@@ -307,11 +327,20 @@ class ECFAgent:
             try:
                 details_res = self.db_connector.execute_query(query)
                 for d in details_res:
-                    tid = str(d.get("transaccionid"))
+                    tid = _extract_record_tid(d, self.id_field)
                     if tid in grouped_details:
                         grouped_details[tid].append(d)
+                if details_res and not any(grouped_details.values()):
+                    logger.warning(
+                        f"Subquery details retornó {len(details_res)} filas pero ninguna coincidió con IDs {list(grouped_details.keys())}. "
+                        f"Columnas en resultado: {list(details_res[0].keys())}"
+                    )
+                elif not details_res:
+                    logger.warning(f"Subquery details retornó 0 filas para IDs ({ids_str})")
             except Exception as e:
                 logger.error(f"Error en subquery details: {e}")
+        else:
+            logger.warning("No se ha configurado 'database.details_query'. Facturas se procesarán sin ítems ('Detalles').")
 
         taxes_query = self.config.get("database.taxes_query")
         if taxes_query:
@@ -320,7 +349,7 @@ class ECFAgent:
             try:
                 taxes_res = self.db_connector.execute_query(query)
                 for t in taxes_res:
-                    tid = str(t.get("transaccionid"))
+                    tid = _extract_record_tid(t, self.id_field)
                     if tid in grouped_taxes:
                         grouped_taxes[tid].append(t)
             except Exception as e:
@@ -333,7 +362,7 @@ class ECFAgent:
             try:
                 pay_res = self.db_connector.execute_query(query)
                 for p in pay_res:
-                    tid = str(p.get("transaccionid"))
+                    tid = _extract_record_tid(p, self.id_field)
                     if tid in grouped_payments:
                         grouped_payments[tid].append(p)
             except Exception as e:
@@ -346,7 +375,7 @@ class ECFAgent:
             try:
                 reference_res = self.db_connector.execute_query(query)
                 for ref in reference_res:
-                    tid = str(ref.get("transaccionid"))
+                    tid = _extract_record_tid(ref, self.id_field)
                     if tid in grouped_reference_info and grouped_reference_info[tid] is None:
                         grouped_reference_info[tid] = ref
             except Exception as e:
@@ -358,11 +387,16 @@ class ECFAgent:
 
         for row in invoices:
             try:
-                row_id = str(row.get(self.id_field))
+                row_id = str(row.get(self.id_field) if row.get(self.id_field) is not None else _extract_record_tid(row))
                 invoice_data = dict(row)
 
                 if self.config.get("database.details_query"):
-                    invoice_data["Detalles"] = grouped_details.get(row_id, [])
+                    details_list = grouped_details.get(row_id, [])
+                    invoice_data["Detalles"] = details_list
+                    if not details_list:
+                        logger.warning(
+                            f"Factura ID {row_id} (e-CF: {row.get(self.ecf_field)}) no tiene detalles/ítems en 'Detalles'."
+                        )
 
                 if self.config.get("database.taxes_query"):
                     invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])

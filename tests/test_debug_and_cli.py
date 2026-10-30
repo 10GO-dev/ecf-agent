@@ -178,3 +178,38 @@ def test_cli_check_config_alias():
         assert result.exit_code == 0
         assert "Configuración válida" in result.output
         assert "Conexión a BD exitosa" in result.output
+
+
+def test_extract_and_prepare_batch_case_insensitive_tid():
+    cfg = _create_mock_config({
+        "database": {
+            "driver": "sqlite",
+            "database": ":memory:",
+            "query": "SELECT 1",
+            "details_query": "SELECT * FROM details WHERE transaccionid IN ({ids})",
+            "id_field": "id",
+            "ecf_field": "ecf",
+            "type_field": "ecf_type",
+            "rnc_buyer_field": "rnc_buyer",
+            "total_field": "total",
+        }
+    })
+    agent = ECFAgent(cfg)
+    agent.db_connector = MagicMock()
+    agent.db_connector.get_pending_invoices.return_value = [
+        {"id": "22", "ecf": "E320000000022", "ecf_type": "32", "rnc_buyer": "10101", "total": "500.00"}
+    ]
+    agent.retry_queue = MagicMock()
+    agent.retry_queue.exists.return_value = False
+
+    agent.db_connector.execute_query.return_value = [
+        {"TransaccionID": 22, "NumeroLinea": 1, "NombreItem": "Producto de prueba"}
+    ]
+
+    invoices_to_send, ids, ecf_map = agent._extract_and_prepare_batch(batch_size=10, filter_retry=True)
+
+    assert len(invoices_to_send) == 1
+    detalles = invoices_to_send[0]["invoice_data"].get("Detalles", [])
+    assert len(detalles) == 1
+    assert detalles[0]["NombreItem"] == "Producto de prueba"
+
