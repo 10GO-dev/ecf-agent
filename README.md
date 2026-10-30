@@ -1,73 +1,137 @@
 # ECF Data Collection Agent
 
-Agente de recolección de comprobantes fiscales electrónicos (e-CF) para instalación en servidores de clientes.
+Agente de recolección de comprobantes fiscales electrónicos (e-CF) para instalación en servidores locales de clientes y ERPs.
 
 ## ¿Qué hace este agente?
 
-1. **Conecta** a la base de datos del sistema de facturación del cliente
-2. **Ejecuta** una query SQL configurada que retorna facturas en formato JSON
-3. **Comprime** cada factura (MessagePack + zstd + base64)
-4. **Envía** al servidor de TekServices en batches
-5. **Reintenta** automáticamente las facturas que fallen
+1. **Conecta** a la base de datos del sistema de facturación local (ERP).
+2. **Extrae** facturas pendientes usando queries SQL configuradas localmente o heredadas desde la nube.
+3. **Comprime** cada comprobante (MessagePack + zstd + base64).
+4. **Transmite** hacia la plataforma TekServices en lotes optimizados.
+5. **Sincroniza** de vuelta en el ERP los estados devueltos por la DGII (aceptada, rechazada, etc.).
+6. **Reintenta** automáticamente facturas con fallos transitorios en una cola local persistente.
+7. **Se gestiona y actualiza remotamente** desde la plataforma web mediante telemetría en tiempo real.
 
 ```mermaid
 graph LR
-    BD[(BD Cliente)] -->|Query SQL| Agent[ECF Agent]
-    Agent -->|MessagePack| Compress[zstd + base64]
-    Compress -->|POST JSON| API[TekServices API]
-    Agent -.->|Reintentos| Queue[(SQLite)]
-    Queue -.-> Agent
+    BD[(BD ERP)] -->|Extracción SQL| Agent[ECF Agent]
+    Agent -->|MessagePack + zstd| Compress[Compresión]
+    Compress -->|POST Lote| API[TekServices API]
+    API -->|Estados DGII| Agent
+    Agent -->|UPDATE ERP| BD
+    Agent -.->|Reintentos| Queue[(SQLite Local)]
+    Platform[Plataforma Web] <-->|Heartbeat & Comandos| Agent
 ```
 
 ## Características
 
-- 🔌 Soporte multi-BD: MySQL, PostgreSQL, SQL Server, Oracle, SQLite
-- 📦 Compresión optimizada (MessagePack + zstd + base64)
-- 🛡️ Alta Resiliencia: Manejo inteligente de fallos parciales, prevención de duplicados e idempotencia (self-healing).
-- 🔁 Cola de reintentos avanzada con SQLite (aislada de extracciones en curso).
-- 🔢 Mapeo dinámico de estados: Traduce automáticamente los estados de la DGII a valores numéricos (o custom) para el ERP.
-- ⚙️ Instalación como servicio (Windows/Linux)
-- 📊 CLI para gestión y monitoreo
+- 🔌 **Soporte Multi-BD**: MySQL, MariaDB, PostgreSQL, Microsoft SQL Server, Oracle y SQLite con timeouts de socket anti-bloqueo.
+- 📦 **Compresión de Alto Rendimiento**: MessagePack + zstd + base64 (~35% menor tamaño y 5-10x más rápido que gzip).
+- ☁️ **Gestión y Configuración Remota**: Consultas SQL, mapeos y tiempos configurables y versionables desde el CodeStudio web de TekServices (heredados por plantilla de proyecto o personalizados por emisor).
+- 💾 **Persistencia y Tolerancia Offline**: La configuración remota se cachea en disco (`data/remote_config.json`); si el servidor reinicia sin Internet, el agente arranca con la última configuración recibida.
+- 🔄 **Actualización Remota On-Demand y Automática**: Capacidad de actualizarse remotamente desde el panel web (tanto binarios empaquetados como despliegues desde fuente bajo `systemd`).
+- 🛡️ **Cola de Reintentos Local Aislada**: Motor SQLite persistente que gestiona facturas fallidas sin bloquear la extracción principal.
+- 🔢 **Mapeo Dinámico de Estados**: Traduce automáticamente los estados de DGII a códigos numéricos o personalizados del ERP.
+- ⚙️ **Instaladores Automáticos para Producción**: Scripts listos para Linux (systemd) y Windows (Servicio NSSM).
 
-## Instalación Rápida
+---
 
+## Instalación en Producción
+
+Las versiones compiladas y empaquetadas están disponibles en [Releases de GitHub](https://github.com/10GO-dev/ecf-agent/releases).
+
+### Opción A: Linux (Binario Autocontenido - Recomendado)
+No requiere Python ni dependencias en el servidor:
 ```bash
-# 1. Clonar/copiar el proyecto
-cd ecf-agent
-
-# 2. Crear entorno virtual
-python -m venv venv
-.\venv\Scripts\activate   # Windows
-source venv/bin/activate  # Linux/macOS
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Instalar compresión zstd (recomendado)
-pip install msgpack zstandard
-
-# 5. Configurar
-cp config/config.example.yaml config/config.yaml
-# Editar config.yaml con credenciales de BD y API
-
-# 6. Validar configuración
-python -m src.main validate
-
-# 7. Ejecutar
-python -m src.main run
+wget https://github.com/10GO-dev/ecf-agent/releases/latest/download/ecf-agent-linux.tar.gz
+tar -xzf ecf-agent-linux.tar.gz
+cd ecf-agent-linux
+sudo ./install-binary.sh
 ```
+
+### Opción B: Linux (Código Fuente con Virtualenv)
+Valida automáticamente soporte SSL e instala dependencias del sistema si faltan:
+```bash
+wget https://github.com/10GO-dev/ecf-agent/releases/latest/download/ecf-agent-linux.tar.gz
+tar -xzf ecf-agent-linux.tar.gz
+cd ecf-agent-linux
+sudo ./install-source.sh
+```
+
+### Opción C: Windows (Servicio Windows)
+Ejecutar PowerShell como Administrador:
+```powershell
+Expand-Archive ecf-agent-windows.zip -DestinationPath C:\TekServices\ECF-Agent
+cd C:\TekServices\ECF-Agent
+.\install.ps1
+```
+
+---
 
 ## Configuración
 
-### Variables de Entorno
+Toda la configuración específica del emisor puede definirse exclusivamente en el archivo `.env`:
 
-```bash
-# .env
-ECF_API_KEY=your_api_key_here
-DB_PASSWORD=your_db_password
+```env
+# RNC del emisor
+CUSTOMER_RNC=130013454
+
+# API Key generada en la plataforma TekServices
+ECF_API_KEY=tek_live_abc123xyz...
+
+# Conexión al ERP del cliente
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=erp_database
+DB_USER=root
+DB_PASSWORD=secret_password
+
+# Opcionales (tienen valores por defecto automáticos)
+# ECF_API_URL=https://api.tekservices.com.do
+# ECF_ENVIRONMENT=DEV
 ```
 
-### Métodos de Compresión
+El archivo `config/config.yaml` puede dejarse genérico o vacío en sus secciones de extracción, ya que:
+1. `api.base_url` se conecta por defecto a `https://api.tekservices.com.do`.
+2. `api.endpoint` usa por defecto `/private/ecf/invoices`.
+3. Las consultas SQL y mapeos de datos se descargan y sincronizan automáticamente desde la plataforma TekServices según el proyecto asignado a la empresa.
+
+---
+
+## Gestión y Comandos Remotos
+
+El agente reporta telemetría (heartbeat) a la plataforma TekServices cada 30 segundos y responde a comandos en tiempo real emitidos desde la interfaz web:
+
+| Comando | Acción |
+| :--- | :--- |
+| `TEST_DB` | Prueba la conexión activa al ERP y mide la latencia en milisegundos. |
+| `FORCE_POLL` | Dispara una extracción inmediata de comprobantes sin esperar el intervalo. |
+| `FORCE_SYNC_STATUS` | Fuerza la sincronización de estados DGII con el ERP. |
+| `FETCH_LOGS` | Retorna las últimas líneas del archivo de registro para diagnóstico remoto. |
+| `PAUSE` / `RESUME` | Pausa o reanuda temporalmente el polling del agente. |
+| `TRIGGER_UPDATE` | Comprueba y aplica la última versión del agente desde GitHub Releases. |
+
+---
+
+## Comandos del CLI
+
+```bash
+# Ejecutar agente en modo servicio
+python -m src.main run
+
+# Ejecutar un ciclo de prueba (debug)
+python -m src.main once --debug
+
+# Verificar conexión y sintaxis de configuración
+python -m src.main check-config
+
+# Ver estado de cola de reintentos
+python -m src.main status
+```
+
+---
+
+## Métodos de Compresión
 
 | Método | Descripción | Tamaño | Velocidad |
 |--------|-------------|--------|-----------|
@@ -75,26 +139,12 @@ DB_PASSWORD=your_db_password
 | `gzip` | JSON + gzip + base64 | Base | Moderada |
 | `none` | Sin compresión | 100% | N/A |
 
-```yaml
-# config.yaml
-api:
-  compression: "zstd"  # Opciones: zstd, gzip, none
-```
-
-## Descompresión en el Servidor (Node.js)
-
-El agente envía datos comprimidos con **Base64 + zstd + MessagePack**. Para descomprimir:
+### Descompresión en el Servidor (Node.js)
 
 ```javascript
 const { decode } = require('@msgpack/msgpack');
 const { ZstdCodec } = require('zstd-codec');
 
-/**
- * Descomprime invoice_data recibido del agente
- * @param {string} compressedBase64 - Datos en formato base64
- * @param {string} compressionMethod - "zstd" | "gzip" | "none"
- * @returns {Promise<object>} - Objeto JSON de la factura
- */
 async function decompressInvoiceData(compressedBase64, compressionMethod = 'zstd') {
     if (compressionMethod === 'none') {
         return JSON.parse(compressedBase64);
@@ -107,20 +157,13 @@ async function decompressInvoiceData(compressedBase64, compressionMethod = 'zstd
         return JSON.parse(decompressed.toString('utf-8'));
     }
     
-    // zstd (default)
     return new Promise((resolve, reject) => {
         ZstdCodec.run(zstd => {
             try {
-                // 1. Base64 → Buffer (bytes comprimidos)
                 const compressedBuffer = Buffer.from(compressedBase64, 'base64');
-                
-                // 2. zstd decompress → bytes MessagePack
                 const simple = new zstd.Simple();
                 const decompressed = simple.decompress(compressedBuffer);
-                
-                // 3. MessagePack decode → objeto JavaScript
                 const data = decode(decompressed);
-                
                 resolve(data);
             } catch (error) {
                 reject(error);
@@ -128,141 +171,33 @@ async function decompressInvoiceData(compressedBase64, compressionMethod = 'zstd
         });
     });
 }
-
-// Uso en Express endpoint
-app.post('/private/ecf/dgii-send', async (req, res) => {
-    const { compression, invoices } = req.body;
-    
-    for (const invoice of invoices) {
-        const invoiceData = await decompressInvoiceData(
-            invoice.invoice_data,
-            invoice.compression || compression
-        );
-        
-        console.log('Factura descomprimida:', invoiceData);
-        // { ECF: {...}, Detalles: [...], FormasPago: [...] }
-    }
-    
-    res.json({ success: true });
-});
 ```
 
-### Dependencias del servidor
-
-```bash
-npm install @msgpack/msgpack zstd-codec
-```
-
-## Query SQL
-
-El agente soporta dos modos de extracción de datos: **Nativo (Recomendado)** y **Pre-ensamblado**.
-
-### 1. Extracción DB-Agnostic (Nativo)
-
-Este método es universal y funciona en cualquier base de datos (MySQL, PostgreSQL, SQL Server, Oracle, SQLite) sin requerir funciones JSON específicas del motor.
-
-La configuración define una consulta principal para las cabeceras y subconsultas usando un comodín de IDs para evitar problemas de N+1 queries. El agente agrupará y ensamblará el JSON final en memoria y de forma nativa.
-
-```yaml
-database:
-  # 1. Consulta principal de cabeceras (requiere alias si nombres de columna no coinciden)
-  query: |
-    SELECT *,
-           transaccionid as id,
-           encf as ecf_number,
-           RNCComprador as rnc_buyer,
-           MontoTotal as total_amount
-    FROM interfazencf
-    WHERE estado = '0' AND (procesadadgii = '0' OR procesadadgii = '' OR procesadadgii IS NULL)
-    ORDER BY transaccionid ASC
-    LIMIT {batch_size}
-
-  # 2. Subconsultas DB-Agnostic para elementos hijos
-  details_query: |
-    SELECT * FROM interfazencfdet WHERE transaccionid IN ({ids})
-  
-  taxes_query: |
-    SELECT * FROM ecftipoimpadic WHERE transaccionid IN ({ids})
-    
-  payments_query: |
-    SELECT * FROM ecfformapago WHERE transaccionid IN ({ids})
-
-### 2. Sincronización de Estados y Resiliencia
-
-El Agente ECF está diseñado para soportar fallos de red y caídas temporales garantizando que tu ERP y el backend estén siempre sincronizados:
-
-```yaml
-database:
-  # Mapeo numérico para el estado devuelto por la DGII.
-  # El Agente traduce "accepted" a "1", "error" a "4", etc.
-  status_mapping:
-    pending: 0
-    accepted: 1
-    conditional_accepted: 2
-    rejected: 3
-    error: 4
-
-  # Actualiza la factura en tu ERP apenas se envía al backend
-  update_query: |
-    UPDATE interfazencf SET estado = '1' WHERE transaccionid = {id}
-
-  # Actualiza el estado real de la DGII cuando el backend lo retorna
-  update_status_query: |
-    UPDATE interfazencf SET procesadadgii = '{status}' WHERE encf = '{ecf}'
-    
-  # (Opcional) Marca fallos definitivos si se agotan los reintentos permitidos
-  update_error_query: |
-    UPDATE interfazencf SET estado = '2', mensaje_error = '{error}' WHERE transaccionid = {id}
-```
-
-## Uso
-
-```bash
-# Servicio continuo
-python -m src.main run
-
-# Una sola ejecución (debug)
-python -m src.main once --debug
-
-# Validar configuración
-python -m src.main validate
-
-# Ver cola de reintentos
-python -m src.main status
-```
-
-## Instalación como Servicio
-
-### Windows
-```powershell
-.\scripts\install_windows.ps1 -Install
-.\scripts\install_windows.ps1 -Start
-```
-
-### Linux
-```bash
-sudo ./scripts/install_linux.sh install
-sudo systemctl start ecf-agent
-```
+---
 
 ## Estructura del Proyecto
 
 ```
 ecf-agent/
 ├── src/
-│   ├── main.py          # Entry point y CLI
-│   ├── config.py        # Carga de configuración
-│   ├── database/        # Conectores de BD
-│   ├── sender/          # Cliente API + compresión
-│   ├── queue/           # Cola de reintentos
-│   └── scheduler/       # Jobs programados
+│   ├── main.py              # CLI y ciclo de vida principal
+│   ├── config.py            # Carga de configuración, variables y caché local
+│   ├── updater.py           # Auto-actualizador binario y código fuente
+│   ├── database/            # Conectores agnósticos (MySQL, Postgres, MSSQL, Oracle)
+│   ├── sender/              # Cliente HTTP y compresión zstd/gzip
+│   ├── remote/              # Heartbeat, telemetría y ejecución de comandos remotos
+│   ├── queue/               # Cola SQLite de reintentos
+│   └── scheduler/           # Planificador APScheduler de tareas
 ├── config/
-│   └── config.example.yaml
-├── scripts/             # Instalación Windows/Linux
-├── logs/
-└── data/               # SQLite para reintentos
+│   ├── config.example.yaml  # Plantilla de configuración
+│   └── mappings/            # Mappings locales opcionales
+├── install-binary.sh        # Instalador Linux para binario precompilado
+├── install-source.sh        # Instalador Linux para despliegue desde código fuente
+├── install.ps1              # Instalador Windows Service con NSSM
+├── requirements.txt         # Dependencias Python
+└── data/                   # Base de datos SQLite y caché de configuración remota
 ```
 
-## License
+## Licencia
 
 MIT
