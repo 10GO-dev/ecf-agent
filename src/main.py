@@ -3,12 +3,13 @@ Entry point principal del Agente ECF.
 Versión simplificada: solo extrae datos de BD y los envía comprimidos.
 """
 
+import os
 import signal
 import threading
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import json
 import datetime
 from decimal import Decimal
@@ -176,22 +177,20 @@ class ECFAgent:
             if str(field).strip()
         }
 
-    def setup_logging(self):
+    def setup_logging(self, log_level: Optional[str] = None):
         """Configura el sistema de logging."""
         log_config = self.config.logging
+        level = log_level or os.getenv("LOG_LEVEL") or log_config.get("level", "INFO")
         
-        # Remover handler por defecto
         logger.remove()
         
-        # Consola
         if log_config.get("console", True):
             logger.add(
                 sys.stderr,
-                level=log_config.get("level", "INFO"),
+                level=level,
                 format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
             )
         
-        # Archivo
         log_file = log_config.get("file")
         if log_file:
             log_path = Path(log_file)
@@ -199,7 +198,7 @@ class ECFAgent:
             
             logger.add(
                 str(log_path),
-                level=log_config.get("level", "INFO"),
+                level=level,
                 rotation=f"{log_config.get('max_size_mb', 10)} MB",
                 retention=log_config.get("backup_count", 5),
                 compression="zip",
@@ -268,6 +267,146 @@ class ECFAgent:
 
         return validation_ecfs
 
+    def _extract_and_prepare_batch(
+        self, batch_size: int, filter_retry: bool = True
+    ) -> Tuple[List[Dict[str, Any]], List[Any], Dict[str, str]]:
+        invoices = self.db_connector.get_pending_invoices(batch_size)
+        self.last_poll_count = len(invoices) if invoices else 0
+
+        if not invoices:
+            logger.debug("No hay facturas pendientes")
+            return [], [], {}
+
+        if filter_retry:
+            filtered_invoices = []
+            for row in invoices:
+                invoice_id = str(row.get(self.id_field))
+                if self.retry_queue.exists(invoice_id):
+                    continue
+                filtered_invoices.append(row)
+            invoices = filtered_invoices
+
+        if not invoices:
+            logger.info("Todas las facturas pendientes están bajo gestión de reintentos")
+            return [], [], {}
+
+        logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
+
+        raw_invoice_ids = [row.get(self.id_field) for row in invoices]
+        grouped_details = {str(id_): [] for id_ in raw_invoice_ids}
+        grouped_taxes = {str(id_): [] for id_ in raw_invoice_ids}
+        grouped_payments = {str(id_): [] for id_ in raw_invoice_ids}
+        grouped_reference_info = {str(id_): None for id_ in raw_invoice_ids}
+
+        ids_str = ",".join(str(id_) for id_ in raw_invoice_ids)
+
+        details_query = self.config.get("database.details_query")
+        if details_query:
+            query = details_query.format(ids=ids_str)
+            logger.debug(f"Ejecutando subquery details: {query}")
+            try:
+                details_res = self.db_connector.execute_query(query)
+                for d in details_res:
+                    tid = str(d.get("transaccionid"))
+                    if tid in grouped_details:
+                        grouped_details[tid].append(d)
+            except Exception as e:
+                logger.error(f"Error en subquery details: {e}")
+
+        taxes_query = self.config.get("database.taxes_query")
+        if taxes_query:
+            query = taxes_query.format(ids=ids_str)
+            logger.debug(f"Ejecutando subquery taxes: {query}")
+            try:
+                taxes_res = self.db_connector.execute_query(query)
+                for t in taxes_res:
+                    tid = str(t.get("transaccionid"))
+                    if tid in grouped_taxes:
+                        grouped_taxes[tid].append(t)
+            except Exception as e:
+                logger.error(f"Error en subquery taxes: {e}")
+
+        payments_query = self.config.get("database.payments_query")
+        if payments_query:
+            query = payments_query.format(ids=ids_str)
+            logger.debug(f"Ejecutando subquery payments: {query}")
+            try:
+                pay_res = self.db_connector.execute_query(query)
+                for p in pay_res:
+                    tid = str(p.get("transaccionid"))
+                    if tid in grouped_payments:
+                        grouped_payments[tid].append(p)
+            except Exception as e:
+                logger.error(f"Error en subquery payments: {e}")
+
+        reference_info_query = self.config.get("database.reference_info_query")
+        if reference_info_query:
+            query = reference_info_query.format(ids=ids_str)
+            logger.debug(f"Ejecutando subquery reference_info: {query}")
+            try:
+                reference_res = self.db_connector.execute_query(query)
+                for ref in reference_res:
+                    tid = str(ref.get("transaccionid"))
+                    if tid in grouped_reference_info and grouped_reference_info[tid] is None:
+                        grouped_reference_info[tid] = ref
+            except Exception as e:
+                logger.error(f"Error en subquery reference_info: {e}")
+
+        invoices_to_send = []
+        valid_invoice_ids = []
+        ecf_to_id = {}
+
+        for row in invoices:
+            try:
+                row_id = str(row.get(self.id_field))
+                invoice_data = dict(row)
+
+                if self.config.get("database.details_query"):
+                    invoice_data["Detalles"] = grouped_details.get(row_id, [])
+
+                if self.config.get("database.taxes_query"):
+                    invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])
+
+                if self.config.get("database.payments_query"):
+                    invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
+
+                if self.config.get("database.reference_info_query"):
+                    reference_info = grouped_reference_info.get(row_id)
+                    if reference_info:
+                        invoice_data["InformacionReferencia"] = reference_info
+
+                invoice_data = normalize_invoice_data_for_xml(
+                    invoice_data,
+                    self.xml_non_convertible_fields,
+                )
+
+                invoice_data = sanitize_for_serialization(invoice_data)
+
+                ecf_num = str(row.get(self.ecf_field, ""))
+                invoice_payload = {
+                    "rnc_buyer": str(row.get(self.rnc_buyer_field, "")),
+                    "ecf": ecf_num,
+                    "ecf_type": str(row.get(self.type_field, "")),
+                    "total_amount": str(row.get(self.total_field, "0.00")),
+                    "invoice_data": invoice_data,
+                }
+
+                logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
+                invoices_to_send.append(invoice_payload)
+                inv_id = row.get(self.id_field)
+                valid_invoice_ids.append(inv_id)
+                if ecf_num:
+                    ecf_to_id[ecf_num] = str(inv_id)
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parseando JSON de factura: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Error procesando factura: {e}")
+                continue
+
+        return invoices_to_send, valid_invoice_ids, ecf_to_id
+
     def poll_invoices(self):
         """
         Trabajo principal: obtiene facturas de la BD y las envía al servidor.
@@ -280,145 +419,13 @@ class ECFAgent:
         try:
             with self.db_lock:
                 with self.db_connector:
-                    invoices = self.db_connector.get_pending_invoices(self.batch_size)
-                    self.last_poll_count = len(invoices) if invoices else 0
-
-                    if not invoices:
-                        logger.debug("No hay facturas pendientes")
-                        return
-
-                    filtered_invoices = []
-                    for row in invoices:
-                        invoice_id = str(row.get(self.id_field))
-                        if self.retry_queue.exists(invoice_id):
-                            continue
-                        filtered_invoices.append(row)
-
-                    invoices = filtered_invoices
-                    if not invoices:
-                        logger.info("Todas las facturas pendientes están bajo gestión de reintentos")
-                        return
-
-                    logger.info(f"Obtenidas {len(invoices)} facturas pendientes")
-
-                    invoices_to_send = []
-                    invoice_ids = []
-
-                    for row in invoices:
-                        invoice_ids.append(row.get(self.id_field))
-
-                    ecf_to_id = {}
-                    for row in invoices:
-                        ecf_value = str(row.get(self.ecf_field, ""))
-                        if ecf_value:
-                            ecf_to_id[ecf_value] = str(row.get(self.id_field))
-
-                    grouped_details = {str(id_): [] for id_ in invoice_ids}
-                    grouped_taxes = {str(id_): [] for id_ in invoice_ids}
-                    grouped_payments = {str(id_): [] for id_ in invoice_ids}
-                    grouped_reference_info = {str(id_): None for id_ in invoice_ids}
-
-                    ids_str = ",".join(str(id_) for id_ in invoice_ids)
-
-                    details_query = self.config.get("database.details_query")
-                    if details_query:
-                        query = details_query.format(ids=ids_str)
-                        logger.debug(f"Ejecutando subquery details: {query}")
-                        try:
-                            details_res = self.db_connector.execute_query(query)
-                            for d in details_res:
-                                tid = str(d.get("transaccionid"))
-                                if tid in grouped_details:
-                                    grouped_details[tid].append(d)
-                        except Exception as e:
-                            logger.error(f"Error en subquery details: {e}")
-
-                    taxes_query = self.config.get("database.taxes_query")
-                    if taxes_query:
-                        query = taxes_query.format(ids=ids_str)
-                        logger.debug(f"Ejecutando subquery taxes: {query}")
-                        try:
-                            taxes_res = self.db_connector.execute_query(query)
-                            for t in taxes_res:
-                                tid = str(t.get("transaccionid"))
-                                if tid in grouped_taxes:
-                                    grouped_taxes[tid].append(t)
-                        except Exception as e:
-                            logger.error(f"Error en subquery taxes: {e}")
-
-                    payments_query = self.config.get("database.payments_query")
-                    if payments_query:
-                        query = payments_query.format(ids=ids_str)
-                        logger.debug(f"Ejecutando subquery payments: {query}")
-                        try:
-                            pay_res = self.db_connector.execute_query(query)
-                            for p in pay_res:
-                                tid = str(p.get("transaccionid"))
-                                if tid in grouped_payments:
-                                    grouped_payments[tid].append(p)
-                        except Exception as e:
-                            logger.error(f"Error en subquery payments: {e}")
-
-                    reference_info_query = self.config.get("database.reference_info_query")
-                    if reference_info_query:
-                        query = reference_info_query.format(ids=ids_str)
-                        logger.debug(f"Ejecutando subquery reference_info: {query}")
-                        try:
-                            reference_res = self.db_connector.execute_query(query)
-                            for ref in reference_res:
-                                tid = str(ref.get("transaccionid"))
-                                if tid in grouped_reference_info and grouped_reference_info[tid] is None:
-                                    grouped_reference_info[tid] = ref
-                        except Exception as e:
-                            logger.error(f"Error en subquery reference_info: {e}")
-
-                    for row in invoices:
-                        try:
-                            row_id = str(row.get(self.id_field))
-
-                            invoice_data = dict(row)
-
-                            if self.config.get("database.details_query"):
-                                invoice_data["Detalles"] = grouped_details.get(row_id, [])
-
-                            if self.config.get("database.taxes_query"):
-                                invoice_data["ImpuestosAdicionales"] = grouped_taxes.get(row_id, [])
-
-                            if self.config.get("database.payments_query"):
-                                invoice_data["FormasPago"] = grouped_payments.get(row_id, [])
-
-                            if self.config.get("database.reference_info_query"):
-                                reference_info = grouped_reference_info.get(row_id)
-                                if reference_info:
-                                    invoice_data["InformacionReferencia"] = reference_info
-
-                            invoice_data = normalize_invoice_data_for_xml(
-                                invoice_data,
-                                self.xml_non_convertible_fields,
-                            )
-
-                            invoice_data = sanitize_for_serialization(invoice_data)
-
-                            invoice_payload = {
-                                "rnc_buyer": str(row.get(self.rnc_buyer_field, "")),
-                                "ecf": str(row.get(self.ecf_field, "")),
-                                "ecf_type": str(row.get(self.type_field, "")),
-                                "total_amount": str(row.get(self.total_field, "0.00")),
-                                "invoice_data": invoice_data,
-                            }
-
-                            logger.debug(f"Factura procesada: {json.dumps(invoice_data, ensure_ascii=False, indent=2)}")
-                            invoices_to_send.append(invoice_payload)
-
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Error parseando JSON de factura: {e}")
-                            continue
-                        except Exception as e:
-                            logger.error(f"Error procesando factura: {e}")
-                            continue
+                    invoices_to_send, invoice_ids, ecf_to_id = self._extract_and_prepare_batch(
+                        self.batch_size, filter_retry=True
+                    )
 
                     if not invoices_to_send:
-                        logger.warning("No se pudieron procesar facturas")
+                        if self.last_poll_count > 0:
+                            logger.warning("No se pudieron procesar facturas")
                         return
 
                     try:
@@ -435,11 +442,6 @@ class ECFAgent:
                         logger.info(f"Batch enviado exitosamente: {len(invoices_to_send)} facturas")
 
                         results = response.get("results", [])
-                        ecf_to_id = {
-                            invoice.get("ecf"): str(invoice_ids[i])
-                            for i, invoice in enumerate(invoices_to_send)
-                            if invoice.get("ecf")
-                        }
                         if results:
                             logger.info(f"Procesando {len(results)} estados recibidos sincrónicamente")
                             for res in results:
@@ -801,15 +803,76 @@ class ECFAgent:
         if isinstance(non_convertible, list):
             self.xml_non_convertible_fields = {str(f).strip() for f in non_convertible if str(f).strip()}
 
-    def run_once(self):
+    def run_once(self, debug: bool = False, dry_run: bool = False):
         """Ejecuta un solo ciclo de polling (para testing/debug)."""
-        self.setup_logging()
-        logger.info(f"ECF Agent v{__version__} - Ejecución única")
-        
-        self.poll_invoices()
-        self.retry_invoices()
-        
+        self.setup_logging(log_level="DEBUG" if debug else None)
+        logger.info(f"ECF Agent v{__version__} - Ejecución única{' (DRY-RUN)' if dry_run else ''}")
+
+        try:
+            if self.config.sync_remote(self.api_client):
+                self._reapply_config_fields()
+                logger.info("Configuración remota sincronizada.")
+        except Exception as e:
+            logger.debug(f"Sincronización remota inicial omitida: {e}")
+
+        if dry_run:
+            self.debug_invoices(limit=self.batch_size, send=False)
+        else:
+            self.poll_invoices()
+            self.retry_invoices()
+
         logger.info("Ejecución completada")
+
+    def debug_invoices(self, limit: int = 1, send: bool = False) -> List[Dict[str, Any]]:
+        """Inspecciona y valida la extracción y mapeo de facturas sin alterar la BD."""
+        self.setup_logging(log_level="DEBUG")
+        logger.info(f"ECF Agent v{__version__} - Modo Debug / Inspección")
+
+        try:
+            if self.config.sync_remote(self.api_client):
+                self._reapply_config_fields()
+                logger.info("Configuración remota sincronizada.")
+        except Exception as e:
+            logger.debug(f"Sincronización remota inicial omitida: {e}")
+
+        with self.db_lock:
+            with self.db_connector:
+                invoices_to_send, invoice_ids, _ = self._extract_and_prepare_batch(
+                    limit, filter_retry=False
+                )
+
+                if not invoices_to_send:
+                    logger.warning("No se encontraron facturas pendientes para inspeccionar")
+                    return []
+
+                logger.info(f"Se extrajeron {len(invoices_to_send)} factura(s) para inspección:")
+                for idx, inv in enumerate(invoices_to_send, 1):
+                    click.echo(f"\n================ [ FACTURA {idx}/{len(invoices_to_send)} ] ================")
+                    click.echo(f"ID Local: {invoice_ids[idx-1]}")
+                    click.echo(f"e-CF: {inv.get('ecf')}")
+                    click.echo(f"Tipo e-CF: {inv.get('ecf_type')}")
+                    click.echo(f"RNC Comprador: {inv.get('rnc_buyer')}")
+                    click.echo(f"Monto Total: {inv.get('total_amount')}")
+                    click.echo("---------------- Payload JSON Normalizado ----------------")
+                    click.echo(json.dumps(inv, ensure_ascii=False, indent=2))
+                    click.echo("========================================================\n")
+
+                if send:
+                    logger.info("Opción --send activada: enviando factura(s) a la API...")
+                    response = self.api_client.send_batch(
+                        self.customer_rnc,
+                        invoices_to_send,
+                        compress=True,
+                        compression_method=self.compression_method,
+                    )
+                    logger.info(f"Respuesta de la API: {response}")
+                    for inv_id in invoice_ids:
+                        self.db_connector.mark_as_processed(inv_id)
+                    logger.info("Factura(s) marcada(s) como procesada(s) en BD.")
+                else:
+                    logger.info("[DRY-RUN] Modo simulación: no se modificó la base de datos ni se envió a la API.")
+
+                return invoices_to_send
 
     def stop(self):
         """Detiene el agente."""
@@ -865,18 +928,51 @@ def run(config: Optional[str]):
     type=click.Path(exists=True),
     help="Ruta al archivo de configuración YAML",
 )
-@click.option("--debug", is_flag=True, help="Habilitar modo debug")
-def once(config: Optional[str], debug: bool):
+@click.option("--debug", is_flag=True, help="Habilitar modo debug con logs detallados")
+@click.option("--dry-run", is_flag=True, help="Simula la extracción sin enviar ni marcar como procesado en BD")
+def once(config: Optional[str], debug: bool, dry_run: bool):
     """Ejecuta un solo ciclo de polling (para testing)."""
     try:
         cfg = load_config(config)
         cfg.validate()
         
-        if debug:
-            logger.add(sys.stderr, level="DEBUG")
+        agent = ECFAgent(cfg)
+        agent.run_once(debug=debug, dry_run=dry_run)
+        
+    except ConfigError as e:
+        click.echo(f"Error de configuración: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-c", "--config",
+    type=click.Path(exists=True),
+    help="Ruta al archivo de configuración YAML",
+)
+@click.option(
+    "-l", "--limit",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Número de facturas a extraer para inspección",
+)
+@click.option(
+    "--send",
+    is_flag=True,
+    help="Enviar factura(s) a la API tras inspección (por defecto es solo simulación / dry-run)",
+)
+def debug(config: Optional[str], limit: int, send: bool):
+    """Inspecciona y valida la extracción y mapeo de facturas sin alterar la BD."""
+    try:
+        cfg = load_config(config)
+        cfg.validate()
         
         agent = ECFAgent(cfg)
-        agent.run_once()
+        agent.debug_invoices(limit=limit, send=send)
         
     except ConfigError as e:
         click.echo(f"Error de configuración: {e}", err=True)
@@ -918,6 +1014,17 @@ def validate(config: Optional[str]):
     except Exception as e:
         click.echo(f"✗ Error: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command("check-config", hidden=True)
+@click.option(
+    "-c", "--config",
+    type=click.Path(exists=True),
+    help="Ruta al archivo de configuración YAML",
+)
+@click.pass_context
+def check_config(ctx, config: Optional[str]):
+    ctx.invoke(validate, config=config)
 
 
 @cli.command()

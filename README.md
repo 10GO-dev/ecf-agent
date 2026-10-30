@@ -116,16 +116,23 @@ El agente reporta telemetría (heartbeat) a la plataforma TekServices cada 30 se
 ## Comandos del CLI
 
 ```bash
-# Ejecutar agente en modo servicio
+# Ejecutar agente en modo servicio continuo
 python -m src.main run
 
-# Ejecutar un ciclo de prueba (debug)
-python -m src.main once --debug
+# Modo depuración: inspecciona la extracción y muestra el JSON formateado (Dry-Run por defecto)
+python -m src.main debug
+python -m src.main debug --limit 3
+python -m src.main debug --send          # Inspecciona y envía a la API marcando como procesado
 
-# Verificar conexión y sintaxis de configuración
-python -m src.main check-config
+# Ejecutar un ciclo único de polling
+python -m src.main once
+python -m src.main once --debug          # Ciclo único con logs detallados (DEBUG)
+python -m src.main once --dry-run        # Ciclo único simulado sin modificar la base de datos
 
-# Ver estado de cola de reintentos
+# Validar sintaxis de configuración y conectividad a base de datos
+python -m src.main validate              # Alias: python -m src.main check-config
+
+# Ver estadísticas de la cola de reintentos SQLite
 python -m src.main status
 ```
 
