@@ -196,7 +196,7 @@ class AutoUpdater:
                     try:
                         logger.info("Actualizando dependencias con pip...")
                         subprocess.run(
-                            [pip_path, "install", "-r", str(target_req)],
+                            [pip_path, "install", "--no-cache-dir", "-r", str(target_req)],
                             check=True,
                             timeout=180,
                             capture_output=True,

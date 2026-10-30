@@ -55,31 +55,84 @@ else
 fi
 
 # 5. Configurar entorno virtual
-echo "Buscando la mejor versión de Python 3 disponible..."
+echo "Buscando versión compatible de Python 3 con soporte SSL..."
+
+is_python_valid() {
+    local cmd="$1"
+    if ! command -v "$cmd" &>/dev/null; then
+        return 1
+    fi
+    local ver=$("$cmd" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null || echo "0.0")
+    local major=$(echo "$ver" | cut -d. -f1)
+    local minor=$(echo "$ver" | cut -d. -f2)
+    if [ "$major" -ne 3 ] || [ "$minor" -lt 8 ]; then
+        return 1
+    fi
+    local ssl_ok=$("$cmd" -c 'import ssl; print("1")' 2>/dev/null || echo "0")
+    if [ "$ssl_ok" != "1" ]; then
+        echo "Aviso: $cmd (v$ver) no tiene el módulo SSL habilitado, omitiendo..."
+        return 1
+    fi
+    return 0
+}
+
 PYTHON_CMD=""
 for cmd in python3.12 python3.11 python3.10 python3.9 python3.8 python3; do
-    if command -v $cmd &>/dev/null; then
+    if is_python_valid "$cmd"; then
+        PYTHON_CMD=$cmd
         VERSION=$($cmd -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-        # Comparar versión (ej. 3.8 >= 3.8)
-        if [ "$(echo $VERSION | cut -d. -f1)" -eq 3 ] && [ "$(echo $VERSION | cut -d. -f2)" -ge 8 ]; then
-            PYTHON_CMD=$cmd
-            echo "Encontrado: $PYTHON_CMD (Versión $VERSION)"
-            break
-        fi
+        echo "Encontrado Python compatible: $PYTHON_CMD (Versión $VERSION con SSL)"
+        break
     fi
 done
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo "ERROR: No se encontró una versión compatible de Python (se requiere 3.8 o superior)."
-    echo "Su versión actual de python3 es $($PYTHON_CMD --version 2>&1 || echo 'desconocida')."
-    echo "Por favor, instale python3.8 o superior: sudo apt-get install python3.8"
+    echo "No se encontró un Python 3 (>= 3.8) con SSL funcional. Intentando instalar paquetes del sistema..."
+    if command -v apt-get &>/dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        apt-get install -y python3 python3-venv python3-pip ca-certificates libssl-dev
+    elif command -v dnf &>/dev/null; then
+        dnf install -y python3 python3-pip ca-certificates openssl-devel
+    elif command -v yum &>/dev/null; then
+        yum install -y python3 python3-pip ca-certificates openssl-devel
+    fi
+
+    for cmd in python3.12 python3.11 python3.10 python3.9 python3.8 python3; do
+        if is_python_valid "$cmd"; then
+            PYTHON_CMD=$cmd
+            VERSION=$($cmd -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+            echo "Encontrado Python compatible tras actualización: $PYTHON_CMD (Versión $VERSION con SSL)"
+            break
+        fi
+    done
+fi
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: No se encontró una versión compatible de Python 3 (>= 3.8) con soporte SSL activo."
+    echo "Sugerencia: Ejecute el instalador binario ./install-binary.sh que no requiere Python en el sistema."
     exit 1
 fi
 
 echo "Configurando entorno virtual usando $PYTHON_CMD en $INSTALL_DIR/venv..."
-$PYTHON_CMD -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip
-"$INSTALL_DIR/venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
+if ! $PYTHON_CMD -m venv "$INSTALL_DIR/venv" 2>/dev/null; then
+    echo "Creando entorno virtual con paquetes auxiliares..."
+    if command -v apt-get &>/dev/null; then
+        apt-get update -y && apt-get install -y python3-venv
+    fi
+    $PYTHON_CMD -m venv "$INSTALL_DIR/venv" || {
+        echo "ERROR: No se pudo crear el entorno virtual en $INSTALL_DIR/venv."
+        exit 1
+    }
+fi
+
+echo "Instalando dependencias..."
+"$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip --no-cache-dir 2>/dev/null || true
+if ! "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir -r "$INSTALL_DIR/requirements.txt"; then
+    echo "ERROR: Falló la instalación de dependencias en requirements.txt."
+    echo "Por favor, revise la conexión a Internet o ejecute ./install-binary.sh"
+    exit 1
+fi
 
 # 6. Asignar permisos
 echo "Asignando permisos..."
