@@ -4,6 +4,7 @@ Soporta compresión gzip y zstd (default) con base64.
 """
 
 import json
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -35,13 +36,12 @@ class ECFApiClient:
         Args:
             config: Configuración de la API (base_url, endpoint, api_key, timeout)
         """
-        self.base_url = config.get("base_url", "").rstrip("/")
-        self.endpoint = config.get("endpoint", "/private/ecf/dgii-send")
-        self.api_key = config.get("api_key")
-        self.environment = config.get("environment", "DEV")
+        self.base_url = (config.get("base_url") or os.environ.get("ECF_API_URL") or "https://api.tekservices.com.do").rstrip("/")
+        self.endpoint = config.get("endpoint") or "/private/ecf/invoices"
+        self.api_key = config.get("api_key") or os.environ.get("ECF_API_KEY")
+        self.environment = config.get("environment") or os.environ.get("ECF_ENVIRONMENT") or "DEV"
         self.timeout = config.get("timeout_seconds", 30)
         
-        # Validar configuración
         if not self.base_url:
             raise ValueError("base_url es requerido")
         if not self.api_key:

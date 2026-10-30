@@ -112,3 +112,25 @@ normalize:
         config = Config(str(config_file))
 
         assert config.get("normalize.xml_non_convertible_fields") == ["MontoTotal", "MontoExento"]
+
+    def test_api_defaults_when_omitted(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Config, "_load_env", lambda self: None)
+        monkeypatch.delenv("ECF_API_URL", raising=False)
+        monkeypatch.delenv("ECF_ENVIRONMENT", raising=False)
+        config_content = """
+agent:
+  customer_rnc: "101010101"
+database:
+  driver: "sqlite"
+  database: ":memory:"
+"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(config_content)
+
+        config = Config(str(config_file))
+
+        assert config.get("api.base_url") == "https://api.tekservices.com.do"
+        assert config.get("api.endpoint") == "/private/ecf/invoices"
+        assert config.get("api.environment") == "DEV"
+        assert config.api["base_url"] == "https://api.tekservices.com.do"
+        assert config.api["endpoint"] == "/private/ecf/invoices"

@@ -80,7 +80,7 @@ def test_heartbeat_manager_pulse():
     agent = MagicMock()
     agent.retry_queue.count.return_value = 3
     agent.paused = False
-    agent.version = "1.2.2"
+    agent.version = "1.2.3"
     agent.config_version = "hash123"
     agent.api_client.send_heartbeat.return_value = {
         "success": True,

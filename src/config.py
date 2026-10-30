@@ -141,26 +141,42 @@ class Config:
         try:
             for k in keys:
                 value = value[k]
-            return self._resolve_env_vars(value)
+            res = self._resolve_env_vars(value)
+            if res is not None and res != "":
+                return res
         except (KeyError, TypeError):
+            pass
+
+        if default is not None:
             return default
 
+        if key == "api.base_url":
+            return os.environ.get("ECF_API_URL", "https://api.tekservices.com.do")
+        elif key == "api.endpoint":
+            return "/private/ecf/invoices"
+        elif key == "api.environment":
+            return os.environ.get("ECF_ENVIRONMENT", "DEV")
+
+        return None
+
     def __getitem__(self, key: str) -> Any:
-        """Acceso por corchetes: config["database"]["host"]."""
         return self._config[key]
 
     @property
     def agent(self) -> Dict[str, Any]:
-        """Configuración del agente."""
         return self._config.get("agent", {})
 
     @property
     def api(self) -> Dict[str, Any]:
-        """Configuración de la API."""
-        api_config = self._config.get("api", {})
-        # Asegurar que el entorno tenga un valor por defecto
-        if "environment" not in api_config:
-            api_config["environment"] = "${ECF_ENVIRONMENT:DEV}"
+        api_config = dict(self._config.get("api", {}))
+        if not api_config.get("base_url"):
+            api_config["base_url"] = os.environ.get("ECF_API_URL", "https://api.tekservices.com.do")
+        if not api_config.get("endpoint"):
+            api_config["endpoint"] = "/private/ecf/invoices"
+        if not api_config.get("environment"):
+            api_config["environment"] = os.environ.get("ECF_ENVIRONMENT", "DEV")
+        if not api_config.get("api_key") and os.environ.get("ECF_API_KEY"):
+            api_config["api_key"] = os.environ.get("ECF_API_KEY")
         return self._resolve_env_vars(api_config)
 
     @property

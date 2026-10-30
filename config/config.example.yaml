@@ -20,10 +20,10 @@ agent:
   # Máximo de reintentos antes de marcar como fallida
   max_retries: 5
 
-# Conexión a la API de TekServices
+# Conexión a la API de TekServices (opcionales: por defecto https://api.tekservices.com.do y /private/ecf/invoices)
 api:
-  base_url: "${ECF_API_URL:https://api.tekservices.com.do}"
-  endpoint: "/private/ecf/invoices"
+  # base_url: "${ECF_API_URL:https://api.tekservices.com.do}"
+  # endpoint: "/private/ecf/invoices"
   
   # Autenticación por API Key (usar variables de entorno)
   api_key: "${ECF_API_KEY}"
