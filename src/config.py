@@ -43,6 +43,9 @@ class Config:
         # Resolver variables de entorno en la configuración
         self._resolve_env_vars()
         
+        # Restaurar configuración remota cacheada en disco si existe
+        self._load_cached_resources()
+        
         logger.info(f"Configuración cargada desde: {self._config_path}")
 
     def _resolve_config_path(self, config_path: Optional[str]) -> Path:
@@ -202,7 +205,7 @@ class Config:
         """Configuración de logging."""
         return self._config.get("logging", {})
 
-    def apply_remote_resources(self, resources: Dict[str, Any], version: Optional[str] = None) -> bool:
+    def apply_remote_resources(self, resources: Dict[str, Any], version: Optional[str] = None, save_cache: bool = True) -> bool:
         changed = False
 
         if "config" in resources and resources["config"].get("content"):
@@ -247,22 +250,46 @@ class Config:
         if version:
             self.config_version = version
 
-        if changed:
-            self._save_effective_cache()
+        if changed and save_cache:
+            self._save_cached_resources(resources, version)
 
         return changed
 
-    def _save_effective_cache(self):
+    def _get_cache_file(self) -> Path:
+        base_dir = self._config_path.parent
+        if base_dir.name == "config":
+            base_dir = base_dir.parent
+        data_dir = base_dir / "data"
+        return data_dir / "remote_config.json"
+
+    def _save_cached_resources(self, resources: Dict[str, Any], version: Optional[str]):
         try:
-            cache_file = Path("./data/effective_config.json")
+            cache_file = self._get_cache_file()
             cache_file.parent.mkdir(parents=True, exist_ok=True)
-            cache_data = {
-                "version": self.config_version,
-                "config": self._config,
+            payload = {
+                "version": version or self.config_version,
+                "resources": resources,
             }
-            cache_file.write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
+            cache_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.debug(f"Configuración remota cacheada en {cache_file}")
         except Exception as e:
-            logger.debug(f"No se pudo guardar effective_config.json: {e}")
+            logger.debug(f"No se pudo guardar remote_config.json: {e}")
+
+    def _load_cached_resources(self):
+        try:
+            cache_file = self._get_cache_file()
+            if not cache_file.exists():
+                return
+            content = cache_file.read_text(encoding="utf-8")
+            data = json.loads(content)
+            if isinstance(data, dict):
+                resources = data.get("resources", {})
+                version = data.get("version")
+                if resources:
+                    self.apply_remote_resources(resources, version, save_cache=False)
+                    logger.info(f"Configuración remota restaurada desde caché ({cache_file.name}, versión: {version})")
+        except Exception as e:
+            logger.warning(f"Error cargando caché de configuración remota: {e}")
 
     def sync_remote(self, api_client: Any) -> bool:
         status, data, etag = api_client.fetch_remote_config(self.config_version)

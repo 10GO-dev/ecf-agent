@@ -48,6 +48,14 @@ database:
     assert config.get("database.ecf_field") == "remote_ecf"
     assert config.get("database.status_mapping") == {"accepted": 9}
 
+    cache_file = tmp_path / "data" / "remote_config.json"
+    assert cache_file.exists()
+
+    config_restarted = Config(str(config_file))
+    assert config_restarted.config_version == "v1.2.3"
+    assert config_restarted.get("agent.batch_size") == 99
+    assert config_restarted.get("database.query") == "SELECT * FROM remote_invoices"
+
 
 def test_command_executor_pause_resume():
     agent = MagicMock()
@@ -80,7 +88,7 @@ def test_heartbeat_manager_pulse():
     agent = MagicMock()
     agent.retry_queue.count.return_value = 3
     agent.paused = False
-    agent.version = "1.2.4"
+    agent.version = "1.2.5"
     agent.config_version = "hash123"
     agent.api_client.send_heartbeat.return_value = {
         "success": True,
