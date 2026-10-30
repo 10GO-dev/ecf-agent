@@ -134,3 +134,19 @@ database:
         assert config.get("api.environment") == "DEV"
         assert config.api["base_url"] == "https://api.tekservices.com.do"
         assert config.api["endpoint"] == "/private/ecf/invoices"
+
+    def test_customer_rnc_from_env(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Config, "_load_env", lambda self: None)
+        monkeypatch.setenv("CUSTOMER_RNC", "130099887")
+        config_content = """
+database:
+  driver: "sqlite"
+  database: ":memory:"
+"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(config_content)
+
+        config = Config(str(config_file))
+
+        assert config.get("agent.customer_rnc") == "130099887"
+        assert config.agent["customer_rnc"] == "130099887"

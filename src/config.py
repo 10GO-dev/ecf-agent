@@ -150,7 +150,9 @@ class Config:
         if default is not None:
             return default
 
-        if key == "api.base_url":
+        if key == "agent.customer_rnc":
+            return os.environ.get("CUSTOMER_RNC") or os.environ.get("ECF_CUSTOMER_RNC")
+        elif key == "api.base_url":
             return os.environ.get("ECF_API_URL", "https://api.tekservices.com.do")
         elif key == "api.endpoint":
             return "/private/ecf/invoices"
@@ -164,7 +166,12 @@ class Config:
 
     @property
     def agent(self) -> Dict[str, Any]:
-        return self._config.get("agent", {})
+        agent_config = dict(self._config.get("agent", {}))
+        if not agent_config.get("customer_rnc"):
+            rnc = os.environ.get("CUSTOMER_RNC") or os.environ.get("ECF_CUSTOMER_RNC")
+            if rnc:
+                agent_config["customer_rnc"] = rnc
+        return self._resolve_env_vars(agent_config)
 
     @property
     def api(self) -> Dict[str, Any]:

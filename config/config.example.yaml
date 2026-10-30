@@ -2,8 +2,8 @@
 # Copiar este archivo a config.yaml y ajustar valores
 
 agent:
-  # RNC del cliente (emisor de los comprobantes)
-  customer_rnc: "101010101"
+  # RNC del cliente (emisor de los comprobantes) - puede definirse aquí o en .env como CUSTOMER_RNC
+  customer_rnc: "${CUSTOMER_RNC:101010101}"
   
   # Intervalo de polling a la base de datos (segundos)
   polling_interval_seconds: 30
