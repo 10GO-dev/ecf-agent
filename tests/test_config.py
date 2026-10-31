@@ -150,3 +150,28 @@ database:
 
         assert config.get("agent.customer_rnc") == "130099887"
         assert config.agent["customer_rnc"] == "130099887"
+
+    def test_zero_yaml_env_hydration(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(Config, "_resolve_config_path", lambda self, p=None: None)
+        monkeypatch.setenv("CUSTOMER_RNC", "131222333")
+        monkeypatch.setenv("ECF_API_KEY", "secret_key_abc")
+        monkeypatch.setenv("ECF_ENVIRONMENT", "CERT")
+        monkeypatch.setenv("DB_DRIVER", "mysql")
+        monkeypatch.setenv("DB_HOST", "10.0.0.15")
+        monkeypatch.setenv("DB_NAME", "erp_prod")
+        monkeypatch.setenv("DB_USER", "ecf_reader")
+        monkeypatch.setenv("DB_PASSWORD", "db_pass_999")
+
+        config = Config()
+        assert config.validate_bootstrap() is True
+        assert config.get("agent.customer_rnc") == "131222333"
+        assert config.api["api_key"] == "secret_key_abc"
+        assert config.api["environment"] == "CERT"
+        assert config.database["driver"] == "mysql"
+        assert config.database["host"] == "10.0.0.15"
+        assert config.database["port"] == 3306
+        assert config.database["database"] == "erp_prod"
+        assert config.database["username"] == "ecf_reader"
+        assert config.database["password"] == "db_pass_999"
+

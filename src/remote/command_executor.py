@@ -31,6 +31,8 @@ class CommandExecutor:
                 return self._fetch_logs(params)
             elif cmd in ("TRIGGER_UPDATE", "UPDATE_VERSION"):
                 return self._trigger_update(params)
+            elif cmd in ("PREVIEW_EXTRACTION", "DRY_RUN_DEBUG"):
+                return self._preview_extraction(params)
             else:
                 return {"success": False, "error": f"Comando no reconocido: {cmd}"}
         except Exception as e:
@@ -93,3 +95,50 @@ class CommandExecutor:
                 import threading
                 threading.Timer(2.0, self.agent.updater.restart).start()
             return result
+
+    def _preview_extraction(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            limit = max(1, min(int(params.get("limit", 1)), 5))
+        except Exception:
+            limit = 1
+
+        try:
+            self.agent.reload_config()
+        except Exception:
+            pass
+
+        with self.agent.db_lock:
+            with self.agent.db_connector:
+                invoices_to_send, invoice_ids, _ = self.agent._extract_and_prepare_batch(
+                    limit, filter_retry=False
+                )
+
+                preview_invoices = []
+                for idx, inv in enumerate(invoices_to_send[:limit]):
+                    inv_id = str(invoice_ids[idx]) if idx < len(invoice_ids) else ""
+                    inv_data = inv.get("invoice_data", {}) if isinstance(inv, dict) else {}
+                    preview_invoices.append({
+                        "id": inv_id,
+                        "ecf": inv.get("ecf", ""),
+                        "ecf_type": inv.get("ecf_type", ""),
+                        "rnc_buyer": inv.get("rnc_buyer", ""),
+                        "total_amount": inv.get("total_amount", ""),
+                        "subquery_counts": {
+                            "details": len(inv_data.get("Detalles") or []),
+                            "taxes": len(inv_data.get("ImpuestosAdicionales") or []),
+                            "payments": len(inv_data.get("FormasPago") or []),
+                            "reference_info": 1 if inv_data.get("InformacionReferencia") else 0,
+                        },
+                        "invoice_data": inv_data,
+                    })
+
+                return {
+                    "success": True,
+                    "invoices_count": len(preview_invoices),
+                    "preview_invoices": preview_invoices,
+                    "message": (
+                        f"Simulación completada: {len(preview_invoices)} comprobante(s) extraído(s) en modo solo-lectura."
+                        if preview_invoices
+                        else "La consulta principal no devolvió comprobantes pendientes en este momento."
+                    ),
+                }

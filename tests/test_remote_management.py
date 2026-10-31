@@ -169,3 +169,120 @@ def test_auto_updater_extract_archive(tmp_path):
 
     assert (out_dir / "hello.txt").exists()
     assert (out_dir / "hello.txt").read_text() == "world"
+
+
+def test_safe_remote_keys_blocks_credentials(tmp_path):
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("""
+agent:
+  customer_rnc: "101010101"
+api:
+  base_url: "https://api.tekservices.com.do"
+  api_key: "local_secret_key"
+database:
+  driver: "mysql"
+  host: "127.0.0.1"
+  password: "local_db_password"
+  query: "SELECT 1"
+logging:
+  file: "./logs/ecf-agent.log"
+""")
+    config = Config(str(config_file))
+
+    resources = {
+        "config": {
+            "content": json.dumps({
+                "agent": {"batch_size": 75, "auto_update": True, "customer_rnc": "999999999"},
+                "api": {"compression": "gzip", "api_key": "hacked_key", "base_url": "https://evil.com"},
+                "logging": {"level": "DEBUG", "file": "/etc/passwd"},
+            })
+        },
+        "queries": {
+            "content": json.dumps({
+                "query": "SELECT * FROM nuevas_facturas LIMIT {batch_size}",
+                "status_pending_query": "SELECT encf FROM nuevas_facturas",
+                "host": "evil.db.host",
+                "password": "hacked",
+            })
+        },
+    }
+
+    config.apply_remote_resources(resources, version="v2.0")
+    assert config.get("agent.batch_size") == 75
+    assert config.get("agent.auto_update") is True
+    assert config.get("agent.customer_rnc") == "101010101"
+    assert config.api["api_key"] == "local_secret_key"
+    assert config.api["base_url"] == "https://api.tekservices.com.do"
+    assert config.get("logging.level") == "DEBUG"
+    assert config.get("logging.file") == "./logs/ecf-agent.log"
+    assert config.get("database.query") == "SELECT * FROM nuevas_facturas LIMIT {batch_size}"
+    assert config.get("database.pending_status_query") == "SELECT encf FROM nuevas_facturas"
+    assert config.get("database.host") == "127.0.0.1"
+    assert config.get("database.password") == "local_db_password"
+
+
+def test_command_executor_preview_extraction():
+    agent = MagicMock()
+    agent._extract_and_prepare_batch.return_value = (
+        [
+            {
+                "ecf": "E320000000025",
+                "ecf_type": "32",
+                "rnc_buyer": "101010101",
+                "total_amount": "1500.00",
+                "invoice_data": {
+                    "encf": "E320000000025",
+                    "Detalles": [{"NombreItem": "Servicio", "MontoItem": "1500.00"}],
+                    "FormasPago": [{"FormaPago": 1, "MontoPago": "1500.00"}],
+                },
+            }
+        ],
+        [42],
+        {"E320000000025": "42"},
+    )
+    executor = CommandExecutor(agent)
+    res = executor.execute("PREVIEW_EXTRACTION", {"limit": 1})
+
+    assert res["success"] is True
+    assert res["invoices_count"] == 1
+    assert len(res["preview_invoices"]) == 1
+    first = res["preview_invoices"][0]
+    assert first["id"] == "42"
+    assert first["ecf"] == "E320000000025"
+    assert first["subquery_counts"]["details"] == 1
+    assert first["subquery_counts"]["payments"] == 1
+
+
+def test_apply_remote_resources_handles_unquoted_mapping_arrays(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        """
+agent:
+  customer_rnc: "101010101"
+api:
+  base_url: "https://api.tekservices.com.do"
+  api_key: "secret"
+database:
+  driver: "mysql"
+  host: "127.0.0.1"
+  database: "erp"
+""",
+        encoding="utf-8",
+    )
+    config = Config(str(cfg_file))
+
+    resources = {
+        "mapping": {
+            "content": '{\n  "id_field": "id",\n  "ecf_field": "ecf_number",\n  "xml_non_convertible_fields": [MontoGravadoTotal,MontoGravadoI3,MontoExento]\n}'
+        }
+    }
+
+    changed = config.apply_remote_resources(resources, version="v3.0", save_cache=False)
+    assert changed is True
+    assert config.get("database.id_field") == "id"
+    assert config.get("normalize.xml_non_convertible_fields") == [
+        "MontoGravadoTotal",
+        "MontoGravadoI3",
+        "MontoExento",
+    ]
+

@@ -441,6 +441,10 @@ class ECFAgent:
 
         return invoices_to_send, valid_invoice_ids, ecf_to_id
 
+    @property
+    def config_version(self) -> Optional[str]:
+        return getattr(self.config, "config_version", None)
+
     def poll_invoices(self):
         """
         Trabajo principal: obtiene facturas de la BD y las envía al servidor.
@@ -448,6 +452,12 @@ class ECFAgent:
         if getattr(self, "paused", False):
             logger.debug("Agente pausado remotamente, omitiendo polling.")
             return 0
+
+        if not self.config.get("database.query"):
+            self.reload_config()
+            if not self.config.get("database.query"):
+                logger.warning("Esperando configuración de 'database.query' desde el portal remoto...")
+                return 0
 
         logger.info("Iniciando polling de facturas...")
         try:
@@ -501,7 +511,7 @@ class ECFAgent:
                                     local_status = str(mapping.get(status_key))
                                     if status_key == "conditional_accepted" and error_msg:
                                         logger.warning(f"e-CF {ecf} aceptado condicional. Mensajes DGII: {error_msg}")
-                                    self.db_connector.update_invoice_status(ecf, local_status, track_id)
+                                    self.db_connector.update_invoice_status(ecf, local_status, track_id, error_msg)
 
                     except APIError as e:
                         logger.error(f"Error de API enviando batch: {e}")
@@ -831,6 +841,14 @@ class ECFAgent:
         self.rnc_buyer_field = self.config.get("database.rnc_buyer_field", self.rnc_buyer_field)
         self.total_field = self.config.get("database.total_field", self.total_field)
 
+        if hasattr(self, "updater") and self.updater:
+            self.updater.auto_update = bool(self.config.get("agent.auto_update", self.updater.auto_update))
+
+        if hasattr(self, "db_connector") and self.db_connector:
+            self.db_connector.config = self.config.database
+            self.db_connector._id_field = self.id_field
+            self.db_connector._processed_field = self.config.get("database.processed_field", "procesado")
+
         non_convertible = self.config.get("normalize.xml_non_convertible_fields", [])
         if isinstance(non_convertible, str):
             non_convertible = [non_convertible]
@@ -943,7 +961,7 @@ def run(config: Optional[str]):
     """Ejecuta el agente en modo servicio continuo."""
     try:
         cfg = load_config(config)
-        cfg.validate()
+        cfg.validate_bootstrap()
         
         agent = ECFAgent(cfg)
         agent.start()
@@ -968,7 +986,7 @@ def once(config: Optional[str], debug: bool, dry_run: bool):
     """Ejecuta un solo ciclo de polling (para testing)."""
     try:
         cfg = load_config(config)
-        cfg.validate()
+        cfg.validate_bootstrap()
         
         agent = ECFAgent(cfg)
         agent.run_once(debug=debug, dry_run=dry_run)
@@ -1003,7 +1021,7 @@ def debug(config: Optional[str], limit: int, send: bool):
     """Inspecciona y valida la extracción y mapeo de facturas sin alterar la BD."""
     try:
         cfg = load_config(config)
-        cfg.validate()
+        cfg.validate_bootstrap()
         
         agent = ECFAgent(cfg)
         agent.debug_invoices(limit=limit, send=send)
@@ -1026,7 +1044,17 @@ def validate(config: Optional[str]):
     """Valida la configuración y prueba la conexión a BD."""
     try:
         cfg = load_config(config)
-        cfg.validate()
+        cfg.validate_bootstrap()
+
+        if not cfg.get("database.query") and cfg.api.get("api_key"):
+            try:
+                api_client = ECFApiClient(cfg.api)
+                cfg.sync_remote(api_client)
+                api_client.close()
+            except Exception:
+                pass
+
+        cfg.validate(require_query=True)
         
         click.echo("✓ Configuración válida")
         click.echo(f"  RNC Cliente: {cfg.get('agent.customer_rnc')}")

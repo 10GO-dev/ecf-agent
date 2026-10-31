@@ -52,6 +52,10 @@ class HeartbeatManager:
 
             status = "PAUSED" if getattr(self.agent, "paused", False) else "ONLINE"
             config_version = getattr(self.agent, "config_version", None)
+            if not isinstance(config_version, str):
+                cfg_obj = getattr(self.agent, "config", None)
+                cfg_ver = getattr(cfg_obj, "config_version", None)
+                config_version = cfg_ver if isinstance(cfg_ver, str) else None
 
             payload = {
                 "agent_id": self.agent_id,

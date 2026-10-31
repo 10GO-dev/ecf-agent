@@ -225,11 +225,13 @@ class DatabaseConnector(ABC):
         safe_ecf = str(ecf_number).replace("'", "''")
         safe_status = str(status).replace("'", "''")
         safe_track_id = str(track_id).replace("'", "''") if track_id else ""
+        safe_error = str(error_message).replace("'", "''") if error_message else ""
         
         query = query_template.format(
             ecf=safe_ecf,
             status=safe_status,
-            track_id=safe_track_id
+            track_id=safe_track_id,
+            error=safe_error,
         )
 
         try:

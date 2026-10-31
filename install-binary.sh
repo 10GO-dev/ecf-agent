@@ -41,14 +41,18 @@ else
     exit 1
 fi
 
+if [ ! -f "$INSTALL_DIR/.env" ] && [ -f ".env.example" ]; then
+    cp .env.example "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+    echo "Plantilla .env creada en $INSTALL_DIR/.env (permisos 600)."
+fi
+
 if [ -f "config.yaml" ]; then
     cp config.yaml "$INSTALL_DIR/"
-    echo "Configuración copiada."
 elif [ -f "config/config.yaml" ]; then
     cp config/config.yaml "$INSTALL_DIR/"
-    echo "Configuración copiada desde config/."
 else
-    echo "ADVERTENCIA: No se encontró 'config.yaml'. Asegúrese de crear uno en $INSTALL_DIR/config.yaml"
+    echo "Modo Zero-YAML: Los parámetros operativos y queries se sincronizarán desde TekServices Cloud."
 fi
 
 # Asignar permisos

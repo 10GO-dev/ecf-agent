@@ -44,14 +44,18 @@ echo "Copiando archivos..."
 cp -r src/* "$INSTALL_DIR/src/"
 cp requirements.txt "$INSTALL_DIR/"
 
+if [ ! -f "$INSTALL_DIR/.env" ] && [ -f ".env.example" ]; then
+    cp .env.example "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+    echo "Plantilla .env creada en $INSTALL_DIR/.env (permisos 600)."
+fi
+
 if [ -f "config/config.yaml" ]; then
     cp config/config.yaml "$INSTALL_DIR/"
-    echo "Configuración copiada desde config/."
 elif [ -f "config.yaml" ]; then
     cp config.yaml "$INSTALL_DIR/"
-    echo "Configuración copiada desde raíz."
 else
-    echo "ADVERTENCIA: No se encontró config.yaml. Deberás crear uno en $INSTALL_DIR/config.yaml"
+    echo "Modo Zero-YAML: Los parámetros operativos y queries se sincronizarán desde TekServices Cloud."
 fi
 
 # 5. Configurar entorno virtual
