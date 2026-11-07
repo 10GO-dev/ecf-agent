@@ -171,17 +171,28 @@ detect_driver_from_env() {
 }
 
 if [ -z "$SELECTED_DRIVER" ]; then
-    if [ "$CREATED_ENV" != "1" ]; then
-        AUTO_DRIVER=$(detect_driver_from_env "$INSTALL_DIR/.env" || detect_driver_from_env ".env" || true)
-        if [ -n "$AUTO_DRIVER" ]; then
-            SELECTED_DRIVER="$AUTO_DRIVER"
-            echo "Driver de base de datos detectado desde .env: $SELECTED_DRIVER"
-        fi
-    fi
-fi
+    DEFAULT_DRIVER=$(detect_driver_from_env "$INSTALL_DIR/.env" 2>/dev/null || detect_driver_from_env ".env" 2>/dev/null || echo "mysql")
 
-if [ -z "$SELECTED_DRIVER" ]; then
-    if [ -t 0 ]; then
+    case "$DEFAULT_DRIVER" in
+        postgres|postgresql)
+            default_opt="2"
+            default_desc="2 [PostgreSQL]"
+            ;;
+        sqlserver|mssql|odbc)
+            default_opt="3"
+            default_desc="3 [SQL Server]"
+            ;;
+        all|todos)
+            default_opt="4"
+            default_desc="4 [Todos]"
+            ;;
+        *)
+            default_opt="1"
+            default_desc="1 [MySQL]"
+            ;;
+    esac
+
+    if [ -t 0 ] || [ -e /dev/tty ]; then
         echo ""
         echo "=================================================="
         echo " Seleccione el motor de base de datos para el ERP "
@@ -191,8 +202,16 @@ if [ -z "$SELECTED_DRIVER" ]; then
         echo " 3) Microsoft SQL Server (ODBC / pyodbc)"
         echo " 4) Todos los motores"
         echo "=================================================="
-        read -rp "Seleccione una opción [1-4] (Por defecto: 1): " driver_opt
+        if [ -e /dev/tty ]; then
+            read -rp "Seleccione una opción [1-4] (Por defecto: $default_desc): " driver_opt </dev/tty || driver_opt=""
+        else
+            read -rp "Seleccione una opción [1-4] (Por defecto: $default_desc): " driver_opt || driver_opt=""
+        fi
+
         case "$driver_opt" in
+            1|mysql|mariadb)
+                SELECTED_DRIVER="mysql"
+                ;;
             2|postgres|postgresql)
                 SELECTED_DRIVER="postgres"
                 ;;
@@ -202,17 +221,21 @@ if [ -z "$SELECTED_DRIVER" ]; then
             4|all|todos)
                 SELECTED_DRIVER="all"
                 ;;
+            "")
+                SELECTED_DRIVER="$DEFAULT_DRIVER"
+                ;;
             *)
-                SELECTED_DRIVER="mysql"
+                echo "Opción no reconocida. Usando por defecto: $DEFAULT_DRIVER"
+                SELECTED_DRIVER="$DEFAULT_DRIVER"
                 ;;
         esac
     else
-        SELECTED_DRIVER="mysql"
-        echo "Modo no interactivo: usando driver por defecto '$SELECTED_DRIVER'"
+        SELECTED_DRIVER="$DEFAULT_DRIVER"
+        echo "Modo no interactivo: usando driver '$SELECTED_DRIVER'"
     fi
 fi
 
-if [ "$CREATED_ENV" = "1" ] && [ "$SELECTED_DRIVER" != "all" ]; then
+if [ -f "$INSTALL_DIR/.env" ] && [ "$SELECTED_DRIVER" != "all" ]; then
     sed -i "s/^DB_DRIVER=.*/DB_DRIVER=$SELECTED_DRIVER/" "$INSTALL_DIR/.env"
 fi
 
