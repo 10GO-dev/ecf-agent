@@ -6,7 +6,33 @@
 # Instala el Agente ECF usando el código fuente y un entorno virtual.
 # Requiere ejecutar con sudo.
 
-INSTANCE_NAME=${1:-""}
+INSTANCE_NAME=""
+SELECTED_DRIVER=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --driver|-d)
+            SELECTED_DRIVER=$(echo "$2" | tr '[:upper:]' '[:lower:]')
+            shift 2
+            ;;
+        --driver=*)
+            SELECTED_DRIVER=$(echo "${1#*=}" | tr '[:upper:]' '[:lower:]')
+            shift 1
+            ;;
+        -*)
+            echo "Opción no reconocida: $1"
+            echo "Uso: sudo ./install-source.sh [nombre-instancia] [--driver mysql|postgres|sqlserver|all]"
+            exit 1
+            ;;
+        *)
+            if [ -z "$INSTANCE_NAME" ]; then
+                INSTANCE_NAME="$1"
+            fi
+            shift 1
+            ;;
+    esac
+done
+
 if [ -z "$INSTANCE_NAME" ]; then
     INSTALL_DIR="/opt/ecf-agent"
     SERVICE_NAME="ecf-agent"
@@ -44,9 +70,11 @@ echo "Copiando archivos..."
 cp -r src/* "$INSTALL_DIR/src/"
 cp requirements.txt "$INSTALL_DIR/"
 
+CREATED_ENV=0
 if [ ! -f "$INSTALL_DIR/.env" ] && [ -f ".env.example" ]; then
     cp .env.example "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
+    CREATED_ENV=1
     echo "Plantilla .env creada en $INSTALL_DIR/.env (permisos 600)."
 fi
 
@@ -130,13 +158,125 @@ if ! $PYTHON_CMD -m venv "$INSTALL_DIR/venv" 2>/dev/null; then
     }
 fi
 
-echo "Instalando dependencias..."
+detect_driver_from_env() {
+    local env_file="$1"
+    if [ -f "$env_file" ]; then
+        local found=$(grep -E '^[[:space:]]*DB_DRIVER=' "$env_file" | head -n1 | cut -d= -f2- | tr -d ' "\r\n' | tr '[:upper:]' '[:lower:]')
+        if [ -n "$found" ]; then
+            echo "$found"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+if [ -z "$SELECTED_DRIVER" ]; then
+    if [ "$CREATED_ENV" != "1" ]; then
+        AUTO_DRIVER=$(detect_driver_from_env "$INSTALL_DIR/.env" || detect_driver_from_env ".env" || true)
+        if [ -n "$AUTO_DRIVER" ]; then
+            SELECTED_DRIVER="$AUTO_DRIVER"
+            echo "Driver de base de datos detectado desde .env: $SELECTED_DRIVER"
+        fi
+    fi
+fi
+
+if [ -z "$SELECTED_DRIVER" ]; then
+    if [ -t 0 ]; then
+        echo ""
+        echo "=================================================="
+        echo " Seleccione el motor de base de datos para el ERP "
+        echo "=================================================="
+        echo " 1) MySQL / MariaDB (Recomendado / Pure Python)"
+        echo " 2) PostgreSQL"
+        echo " 3) Microsoft SQL Server (ODBC / pyodbc)"
+        echo " 4) Todos los motores"
+        echo "=================================================="
+        read -rp "Seleccione una opción [1-4] (Por defecto: 1): " driver_opt
+        case "$driver_opt" in
+            2|postgres|postgresql)
+                SELECTED_DRIVER="postgres"
+                ;;
+            3|sqlserver|mssql|odbc)
+                SELECTED_DRIVER="sqlserver"
+                ;;
+            4|all|todos)
+                SELECTED_DRIVER="all"
+                ;;
+            *)
+                SELECTED_DRIVER="mysql"
+                ;;
+        esac
+    else
+        SELECTED_DRIVER="mysql"
+        echo "Modo no interactivo: usando driver por defecto '$SELECTED_DRIVER'"
+    fi
+fi
+
+if [ "$CREATED_ENV" = "1" ] && [ "$SELECTED_DRIVER" != "all" ]; then
+    sed -i "s/^DB_DRIVER=.*/DB_DRIVER=$SELECTED_DRIVER/" "$INSTALL_DIR/.env"
+fi
+
+echo "Instalando dependencias base..."
 "$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip --no-cache-dir 2>/dev/null || true
-if ! "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir -r "$INSTALL_DIR/requirements.txt"; then
-    echo "ERROR: Falló la instalación de dependencias en requirements.txt."
-    echo "Por favor, revise la conexión a Internet o ejecute ./install-binary.sh"
+
+grep -v -E '^(pymysql|psycopg2|pyodbc|cx_Oracle)' "$INSTALL_DIR/requirements.txt" > "$INSTALL_DIR/requirements.base.txt"
+if ! "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir -r "$INSTALL_DIR/requirements.base.txt"; then
+    rm -f "$INSTALL_DIR/requirements.base.txt"
+    echo "ERROR: Falló la instalación de dependencias base."
     exit 1
 fi
+rm -f "$INSTALL_DIR/requirements.base.txt"
+
+case "$SELECTED_DRIVER" in
+    mysql|mariadb)
+        echo "Instalando driver MySQL (pymysql)..."
+        "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "pymysql>=1.1"
+        ;;
+    postgres|postgresql)
+        echo "Instalando driver PostgreSQL (psycopg2-binary)..."
+        "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "psycopg2-binary>=2.9"
+        ;;
+    sqlserver|mssql|odbc)
+        echo "Instalando driver SQL Server (pyodbc)..."
+        if ! echo '#include <sql.h>' | gcc -E - &>/dev/null; then
+            echo "Instalando cabeceras unixODBC requeridas para pyodbc..."
+            if command -v apt-get &>/dev/null; then
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -y && apt-get install -y unixodbc-dev g++ || true
+            elif command -v dnf &>/dev/null; then
+                dnf install -y unixODBC-devel gcc-c++ || true
+            elif command -v yum &>/dev/null; then
+                yum install -y unixODBC-devel gcc-c++ || true
+            fi
+        fi
+        if ! "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "pyodbc>=5.0"; then
+            echo "ERROR: Falló la instalación de pyodbc. Instale unixodbc-dev o ejecute ./install-binary.sh"
+            exit 1
+        fi
+        ;;
+    sqlite)
+        echo "Driver SQLite listo (integrado en Python)."
+        ;;
+    all)
+        echo "Instalando todos los drivers disponibles..."
+        "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "pymysql>=1.1" "psycopg2-binary>=2.9"
+        if ! echo '#include <sql.h>' | gcc -E - &>/dev/null; then
+            if command -v apt-get &>/dev/null; then
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -y && apt-get install -y unixodbc-dev g++ || true
+            elif command -v dnf &>/dev/null; then
+                dnf install -y unixODBC-devel gcc-c++ || true
+            fi
+        fi
+        "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "pyodbc>=5.0" || {
+            echo "Aviso: No se pudo compilar pyodbc. Se instaló soporte para MySQL y PostgreSQL."
+        }
+        ;;
+    *)
+        echo "Driver desconocido '$SELECTED_DRIVER'. Instalando MySQL por defecto..."
+        "$INSTALL_DIR/venv/bin/python" -m pip install --no-cache-dir "pymysql>=1.1"
+        ;;
+esac
 
 # 6. Asignar permisos
 echo "Asignando permisos..."
@@ -180,6 +320,7 @@ echo "INSTALACIÓN COMPLETADA EXITOSAMENTE (FUENTE)"
 echo "Instancia: ${INSTANCE_NAME:-por defecto}"
 echo "Servicio: $SERVICE_NAME"
 echo "Versión: $VERSION"
+echo "Driver ERP: $SELECTED_DRIVER"
 echo "Directorio: $INSTALL_DIR"
 echo "==================================================="
 echo "Pasos siguientes:"
