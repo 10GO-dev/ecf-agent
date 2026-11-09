@@ -70,7 +70,7 @@ After=network.target
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/ecf-agent
+ExecStart=$INSTALL_DIR/ecf-agent run
 Restart=always
 RestartSec=10
 

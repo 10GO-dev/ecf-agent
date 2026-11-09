@@ -3,8 +3,8 @@
 block_cipher = None
 
 a = Analysis(
-    ['src/main.py'],
-    pathex=[],
+    ['entrypoint.py'],
+    pathex=['.'],
     binaries=[],
     datas=[],
     hiddenimports=['pg8000', 'pymysql', 'psycopg2', 'pyodbc', 'tqdm'],  # Drivers comunes y utilidades
