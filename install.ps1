@@ -89,24 +89,33 @@ if (-not (Test-Path $TargetConfig)) {
 # 6. Gestionar NSSM (Non-Sucking Service Manager)
 $NssmPath = Join-Path $InstallationPath "nssm.exe"
 $LocalNssm = Join-Path $SourceDir "nssm.exe"
+$ToolsNssm = Join-Path $SourceDir "tools\nssm.exe"
 
 if (Test-Path $LocalNssm) {
     Copy-Item -Path $LocalNssm -Destination $NssmPath -Force
     Write-Host "NSSM copiado desde carpeta local a $NssmPath" -ForegroundColor Green
+} elseif (Test-Path $ToolsNssm) {
+    Copy-Item -Path $ToolsNssm -Destination $NssmPath -Force
+    Write-Host "NSSM copiado desde tools\ a $NssmPath" -ForegroundColor Green
 } elseif (-not (Test-Path $NssmPath)) {
     Write-Host "Descargando NSSM..." -ForegroundColor Cyan
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-    $ZipPath = Join-Path $env:TEMP "nssm.zip"
+    $ZipPath = Join-Path $env:TEMP "nssm_pkg.zip"
     $ExtractDir = Join-Path $env:TEMP "nssm_extracted"
     try {
-        Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $ZipPath -TimeoutSec 30
+        $NssmUrl = "https://community.chocolatey.org/api/v2/package/NSSM/2.24.101"
+        Invoke-WebRequest -Uri $NssmUrl -OutFile $ZipPath -TimeoutSec 30
         Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
-        $NssmBinary = Join-Path $ExtractDir "nssm-2.24\win64\nssm.exe"
-        if (Test-Path $NssmBinary) {
-            Copy-Item $NssmBinary -Destination $NssmPath -Force
-            Write-Host "NSSM instalado correctamente en $NssmPath" -ForegroundColor Green
-        } else {
-            throw "No se encontró el binario win64\nssm.exe en el paquete descargado."
+        $InnerZip = Join-Path $ExtractDir "tools\nssm-2.24-101-g897c7ad.zip"
+        if (Test-Path $InnerZip) {
+            $InnerExtract = Join-Path $env:TEMP "nssm_inner"
+            Expand-Archive -Path $InnerZip -DestinationPath $InnerExtract -Force
+            $NssmBinary = Join-Path $InnerExtract "nssm-2.24-101-g897c7ad\win64\nssm.exe"
+            if (Test-Path $NssmBinary) {
+                Copy-Item $NssmBinary -Destination $NssmPath -Force
+                Write-Host "NSSM instalado correctamente en $NssmPath" -ForegroundColor Green
+            }
+            Remove-Item -Path $InnerExtract -Recurse -Force -ErrorAction SilentlyContinue
         }
     } catch {
         Write-Warning "No se pudo descargar automáticamente NSSM: $_"

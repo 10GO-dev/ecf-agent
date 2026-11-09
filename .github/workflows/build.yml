@@ -38,6 +38,7 @@ jobs:
         cp install.ps1 ecf-agent-windows/
         cp .env.example ecf-agent-windows/
         cp config/config.example.yaml ecf-agent-windows/
+        cp tools/nssm.exe ecf-agent-windows/
         compress-archive -Path ecf-agent-windows/* -DestinationPath ecf-agent-windows.zip
 
     - name: Package (Linux)
