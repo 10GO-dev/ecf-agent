@@ -36,6 +36,7 @@ jobs:
         mkdir ecf-agent-windows
         cp dist/ecf-agent.exe ecf-agent-windows/
         cp install.ps1 ecf-agent-windows/
+        cp install.cmd ecf-agent-windows/
         cp .env.example ecf-agent-windows/
         cp config/config.example.yaml ecf-agent-windows/
         cp tools/nssm.exe ecf-agent-windows/
