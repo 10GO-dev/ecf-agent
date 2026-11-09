@@ -141,8 +141,8 @@ Write-Host "Configurando servicio $ServiceName..." -ForegroundColor Cyan
 & $NssmPath set $ServiceName AppDirectory "$InstallationPath"
 & $NssmPath set $ServiceName Description "Agente de Recolección de Comprobantes Fiscales Electrónicos - TekServices"
 & $NssmPath set $ServiceName Start SERVICE_AUTO_START
-& $NssmPath set $ServiceName AppStdout "$InstallationPath\logs\service-out.log"
-& $NssmPath set $ServiceName AppStderr "$InstallationPath\logs\service-err.log"
+& $NssmPath set $ServiceName AppStdout "$InstallationPath\logs\service.log"
+& $NssmPath set $ServiceName AppStderr "$InstallationPath\logs\service.log"
 & $NssmPath set $ServiceName AppRotateFiles 1
 & $NssmPath set $ServiceName AppRotateOnline 1
 & $NssmPath set $ServiceName AppRotateSeconds 86400
@@ -187,5 +187,5 @@ Write-Host "   & '$TargetExe' validate"
 Write-Host "3. Inicie el servicio de Windows:"
 Write-Host "   & '$NssmPath' start $ServiceName  (o Start-Service $ServiceName)"
 Write-Host "4. Consulte los registros del servicio en:"
-Write-Host "   Get-Content '$InstallationPath\logs\service-out.log' -Wait -Tail 30"
+Write-Host "   Get-Content '$InstallationPath\logs\service.log' -Wait -Tail 30"
 Write-Host "==================================================="

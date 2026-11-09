@@ -63,7 +63,7 @@ function Install-Service {
         & $NssmPath set $ServiceName Description $Description
         & $NssmPath set $ServiceName Start SERVICE_AUTO_START
         & $NssmPath set $ServiceName AppStdout "$ProjectRoot\logs\service.log"
-        & $NssmPath set $ServiceName AppStderr "$ProjectRoot\logs\service-error.log"
+        & $NssmPath set $ServiceName AppStderr "$ProjectRoot\logs\service.log"
         
         $Version = "desconocida"
         if (Test-Path "$ProjectRoot\src\__init__.py") {
