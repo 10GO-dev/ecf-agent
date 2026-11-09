@@ -162,6 +162,9 @@ class Config:
             ("password", ("DB_PASSWORD", "ECF_DB_PASSWORD")),
             ("charset", ("DB_CHARSET",)),
             ("odbc_driver", ("ODBC_DRIVER", "DB_ODBC_DRIVER")),
+            ("query", ("DB_QUERY", "ECF_DB_QUERY")),
+            ("id_field", ("DB_ID_FIELD", "ECF_DB_ID_FIELD")),
+            ("ecf_field", ("DB_ECF_FIELD", "ECF_DB_ECF_FIELD")),
         ]
         for key, env_vars in env_db_map:
             if self._is_unresolved_or_empty(db_sec.get(key)):
