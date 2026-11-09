@@ -1046,17 +1046,26 @@ def validate(config: Optional[str]):
         cfg = load_config(config)
         cfg.validate_bootstrap()
 
-        if not cfg.get("database.query") and cfg.api.get("api_key"):
-            try:
-                api_client = ECFApiClient(cfg.api)
-                cfg.sync_remote(api_client)
-                api_client.close()
-            except Exception:
-                pass
+        if not cfg.get("database.query"):
+            api_key = cfg.api.get("api_key")
+            if api_key and api_key != "your_api_key_here":
+                click.echo("Intentando sincronizar queries desde TekServices Cloud...")
+                try:
+                    api_client = ECFApiClient(cfg.api)
+                    synced = cfg.sync_remote(api_client)
+                    api_client.close()
+                    if synced:
+                        click.echo("[OK] Queries sincronizadas exitosamente desde la nube")
+                    else:
+                        click.echo("Aviso: La API no devolvió configuración remota (verifique ECF_API_KEY, ECF_API_URL y que el emisor tenga queries asignadas).", err=True)
+                except Exception as e:
+                    click.echo(f"Aviso: Error conectando con la API para sincronizar queries: {e}", err=True)
+            elif not api_key or api_key == "your_api_key_here":
+                click.echo("Aviso: ECF_API_KEY no está configurada en .env (o aún tiene el valor de ejemplo 'your_api_key_here').", err=True)
 
         cfg.validate(require_query=True)
         
-        click.echo("✓ Configuración válida")
+        click.echo("[OK] Configuración válida")
         click.echo(f"  RNC Cliente: {cfg.get('agent.customer_rnc')}")
         click.echo(f"  Base de datos: {cfg.get('database.driver')}://{cfg.get('database.host')}")
         click.echo(f"  API: {cfg.get('api.base_url')}")
@@ -1065,16 +1074,16 @@ def validate(config: Optional[str]):
         click.echo("\nProbando conexión a base de datos...")
         connector = create_connector(cfg.database)
         if connector.test_connection():
-            click.echo("✓ Conexión a BD exitosa")
+            click.echo("[OK] Conexión a BD exitosa")
         else:
-            click.echo("✗ Error de conexión a BD", err=True)
+            click.echo("[ERROR] Error de conexión a BD", err=True)
             sys.exit(1)
         
     except ConfigError as e:
-        click.echo(f"✗ Error de configuración: {e}", err=True)
+        click.echo(f"[ERROR] Error de configuración: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"✗ Error: {e}", err=True)
+        click.echo(f"[ERROR] Error: {e}", err=True)
         sys.exit(1)
 
 

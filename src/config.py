@@ -427,7 +427,7 @@ class Config:
 
         missing = []
         if require_query and not self.get("database.query"):
-            missing.append("  - database.query: Query de consulta")
+            missing.append("  - database.query: Query de consulta (requiere sincronización con la API vía ECF_API_KEY o definir config.yaml)")
 
         if missing:
             raise ConfigError(
