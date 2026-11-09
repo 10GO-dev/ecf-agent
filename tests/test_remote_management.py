@@ -304,5 +304,9 @@ def test_command_executor_fetch_logs(tmp_path, monkeypatch):
     assert res["success"] is True
     assert res["lines"] == ["line 2", "line 3"]
     assert res["file"] == "service-err.log"
+    assert res["total_lines"] == 3
+    assert res["returned_lines"] == 2
+    assert "file_size" in res
+    assert "modified_at" in res
 
 

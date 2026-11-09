@@ -136,28 +136,70 @@ class CommandExecutor:
         return existing
 
     def _fetch_logs(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        max_lines = params.get("lines", 100)
+        try:
+            max_lines = max(1, min(int(params.get("lines", 100)), 5000))
+        except (ValueError, TypeError):
+            max_lines = 100
+
+        level_filter = str(params.get("level") or "").strip().upper()
+        search_filter = str(params.get("search") or "").strip().lower()
+
         found_files = self._find_log_files()
 
         if not found_files:
             return {
                 "success": True,
                 "lines": ["No se encontró ningún archivo de registros (.log) en ./logs ni en el directorio del agente."],
+                "available_files": [],
             }
 
         target_file = found_files[0]
         try:
+            st = target_file.stat()
+            file_size_bytes = st.st_size
+            if file_size_bytes < 1024:
+                size_formatted = f"{file_size_bytes} B"
+            elif file_size_bytes < 1024 * 1024:
+                size_formatted = f"{file_size_bytes / 1024:.1f} KB"
+            else:
+                size_formatted = f"{file_size_bytes / (1024 * 1024):.2f} MB"
+
+            from datetime import datetime
+            modified_at = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
             with open(target_file, "r", encoding="utf-8", errors="replace") as f:
-                all_lines = f.readlines()
-                selected = all_lines[-max_lines:]
-                lines = [line.rstrip() for line in selected if line.strip()]
-                if not lines:
-                    lines = [f"El archivo de logs ({target_file.name}) está vacío."]
-                return {
-                    "success": True,
-                    "lines": lines,
-                    "file": target_file.name,
-                }
+                all_raw_lines = f.readlines()
+
+            total_lines = len(all_raw_lines)
+            filtered = []
+            for raw_line in all_raw_lines:
+                line = raw_line.rstrip()
+                if not line:
+                    continue
+                if level_filter and level_filter not in line.upper():
+                    continue
+                if search_filter and search_filter not in line.lower():
+                    continue
+                filtered.append(line)
+
+            selected = filtered[-max_lines:]
+            msg = None
+            if not selected:
+                msg = f"El archivo {target_file.name} no contiene registros con los filtros seleccionados." if (level_filter or search_filter) else f"El archivo de logs ({target_file.name}) está vacío."
+                selected = [msg]
+
+            return {
+                "success": True,
+                "lines": selected,
+                "file": target_file.name,
+                "file_path": str(target_file),
+                "file_size": size_formatted,
+                "file_size_bytes": file_size_bytes,
+                "total_lines": total_lines,
+                "returned_lines": len(selected) if msg is None else 0,
+                "modified_at": modified_at,
+                "available_files": [f.name for f in found_files[:5]],
+            }
         except Exception as e:
             return {"success": False, "error": f"Error leyendo logs de {target_file}: {e}"}
 
