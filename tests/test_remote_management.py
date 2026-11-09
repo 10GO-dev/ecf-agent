@@ -286,3 +286,23 @@ database:
         "MontoExento",
     ]
 
+
+def test_command_executor_fetch_logs(tmp_path, monkeypatch):
+    agent = MagicMock()
+    agent.config.get.return_value = None
+    agent.updater.app_path = tmp_path / "ecf-agent.exe"
+
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    err_log = logs_dir / "service-err.log"
+    err_log.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+
+    executor = CommandExecutor(agent)
+    monkeypatch.chdir(tmp_path)
+
+    res = executor.execute("FETCH_LOGS", {"lines": 2})
+    assert res["success"] is True
+    assert res["lines"] == ["line 2", "line 3"]
+    assert res["file"] == "service-err.log"
+
+

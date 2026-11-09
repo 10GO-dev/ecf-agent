@@ -301,11 +301,57 @@ class AutoUpdater:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
 
+    def _is_running_as_windows_service(self) -> bool:
+        if sys.platform != "win32":
+            return False
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            class PROCESSENTRY32(ctypes.Structure):
+                _fields_ = [
+                    ('dwSize', wintypes.DWORD),
+                    ('cntUsage', wintypes.DWORD),
+                    ('th32ProcessID', wintypes.DWORD),
+                    ('th32DefaultHeapID', ctypes.c_size_t),
+                    ('th32ModuleID', wintypes.DWORD),
+                    ('cntThreads', wintypes.DWORD),
+                    ('th32ParentProcessID', wintypes.DWORD),
+                    ('pcPriClassBase', wintypes.LONG),
+                    ('dwFlags', wintypes.DWORD),
+                    ('szExeFile', ctypes.c_char * 260)
+                ]
+
+            h = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+            pe = PROCESSENTRY32()
+            pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+            parents = {}
+            if kernel32.Process32First(h, ctypes.byref(pe)):
+                while True:
+                    parents[pe.th32ProcessID] = (pe.th32ParentProcessID, pe.szExeFile.decode('latin1', 'ignore').lower())
+                    if not kernel32.Process32Next(h, ctypes.byref(pe)):
+                        break
+            kernel32.CloseHandle(h)
+
+            cur = os.getpid()
+            while cur in parents:
+                pid, name = parents[cur]
+                if "nssm.exe" in name or "services.exe" in name:
+                    return True
+                cur = pid
+        except Exception as e:
+            logger.debug(f"Error comprobando servicio de Windows: {e}")
+        return False
+
     def restart(self):
         logger.info("Reiniciando proceso del agente...")
         sys.stdout.flush()
         sys.stderr.flush()
         if sys.platform == 'win32':
+            if self._is_running_as_windows_service():
+                logger.info("Proceso supervisado por servicio de Windows (NSSM). Saliendo para reinicio automático por el servicio...")
+                sys.exit(0)
             if self.is_frozen:
                 subprocess.Popen([str(self.app_path)] + sys.argv[1:])
             else:
